@@ -34,6 +34,7 @@ from a1.util import resource_path  # noqa: E402
 from a1.vla.affordvla import AffordVLA  # noqa: E402
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import (
     get_robot_action_dim_info,
     pack_robot_state,
@@ -318,32 +319,55 @@ class Model(ModelTemplate):
         )
 
     def _resolve_model_path(self, model_cfg):
+        # Explicit model_path short-circuits: it may point directly at an unsharded
+        # checkpoint dir, so return it verbatim when no *-unsharded snapshot is found.
         model_path = model_cfg.get("model_path") or None
         if model_path:
             latest = _find_latest_unsharded(model_path)
             return latest or model_path
 
         run_base = str(model_cfg.get("ckpt_name") or model_cfg.get("task_name", ""))
+        checkpoints_root = (_SCRIPT_DIR / "checkpoints").resolve()
+
+        # ckpt_name falls back to task_name for the run-dir name (legacy behavior).
+        resolve_cfg = dict(model_cfg)
+        if not resolve_cfg.get("ckpt_name") and resolve_cfg.get("task_name"):
+            resolve_cfg["ckpt_name"] = resolve_cfg["task_name"]
+        candidates = candidate_checkpoint_roots(
+            resolve_cfg,
+            checkpoints_root,
+            policy_dir=_SCRIPT_DIR,
+            explicit_keys=("model_path",),
+        )
+
         checked_paths: list[Path] = []
-        latest_file = _SCRIPT_DIR / "checkpoints" / f"{run_base}.latest"
-        checked_paths.append(latest_file)
-        if latest_file.is_file():
-            latest = _find_latest_unsharded(latest_file.read_text().strip())
+        for candidate in candidates:
+            # `<name>.latest` sidecar file points at the real run dir.
+            latest_file = candidate.parent / f"{candidate.name}.latest"
+            checked_paths.append(latest_file)
+            if latest_file.is_file():
+                latest = _find_latest_unsharded(latest_file.read_text().strip())
+                if latest:
+                    return latest
+
+            checked_paths.append(candidate)
+            latest = _find_latest_unsharded(str(candidate))
             if latest:
                 return latest
 
-        checkpoints_dir = _SCRIPT_DIR / "checkpoints"
-        if checkpoints_dir.is_dir():
-            exact_dir = checkpoints_dir / run_base
-            checked_paths.append(exact_dir)
-            candidates = [exact_dir] if exact_dir.is_dir() else []
-            prefix_matches = sorted(checkpoints_dir.glob(f"{run_base}-*"), key=lambda p: p.stat().st_mtime, reverse=True)
-            checked_paths.extend(prefix_matches[:5])
-            candidates.extend(prefix_matches)
-            for match in candidates:
-                latest = _find_latest_unsharded(match)
-                if latest:
-                    return latest
+            # Prefix `<name>-*` glob only for a bare name under checkpoints/
+            # (never glob an absolute/external path, which would crash).
+            if candidate.parent == checkpoints_root and checkpoints_root.is_dir():
+                prefix_matches = sorted(
+                    checkpoints_root.glob(f"{candidate.name}-*"),
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                checked_paths.extend(prefix_matches[:5])
+                for match in prefix_matches:
+                    latest = _find_latest_unsharded(match)
+                    if latest:
+                        return latest
 
         if _env_truthy("A1_ALLOW_DEFAULT_MODEL_PATH"):
             print(

@@ -15,6 +15,7 @@ from openpi.shared import normalize as _normalize
 from openpi.training import config as _config
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import get_robot_action_dim_info, pack_robot_state, unpack_robot_state
 
 
@@ -30,23 +31,12 @@ def _extract_step_number(value: Any) -> int | None:
     return int(digits) if digits else None
 
 
-def _resolve_pi05_model_root(model_cfg: dict[str, Any]) -> Path:
-    ckpt_name = model_cfg.get("ckpt_name")
-    if not ckpt_name:
-        model_path = model_cfg.get("model_path") or model_cfg.get("checkpoint_path")
-        if model_path is None:
-            raise ValueError("ckpt_name or model_path is required for Pi_05.")
-        return Path(model_path).expanduser().resolve()
-
-    raw_checkpoint_path = Path(str(ckpt_name)).expanduser()
-    if raw_checkpoint_path.is_absolute():
-        checkpoint_root = raw_checkpoint_path.resolve()
-    elif raw_checkpoint_path.parts and raw_checkpoint_path.parts[0] == "checkpoints":
-        checkpoint_root = (_POLICY_DIR / raw_checkpoint_path).resolve()
-    else:
-        checkpoint_root = (_CHECKPOINTS_DIR / raw_checkpoint_path).resolve()
+def _select_pi05_dir(checkpoint_root: Path, model_cfg: dict[str, Any]) -> Path | None:
+    """Within an existing checkpoint root, pick the params/assets dir honoring
+    checkpoint_num (with step scaling). Returns None if the root is not a usable
+    checkpoint directory so the caller can try the next candidate."""
     if not checkpoint_root.is_dir():
-        return checkpoint_root
+        return None
 
     candidate_dirs = []
     if (checkpoint_root / "params").exists() or (checkpoint_root / "assets").exists():
@@ -57,7 +47,7 @@ def _resolve_pi05_model_root(model_cfg: dict[str, Any]) -> Path:
         if child.is_dir() and ((child / "params").exists() or (child / "assets").exists())
     )
     if not candidate_dirs:
-        return checkpoint_root
+        return None
 
     checkpoint_num = model_cfg.get("checkpoint_num")
     desired_step = _extract_step_number(checkpoint_num)
@@ -82,6 +72,22 @@ def _resolve_pi05_model_root(model_cfg: dict[str, Any]) -> Path:
     if numeric_dirs:
         return max(numeric_dirs, key=lambda candidate: _extract_step_number(candidate.name) or -1)
     return candidate_dirs[0]
+
+
+def _resolve_pi05_model_root(model_cfg: dict[str, Any]) -> Path:
+    roots = candidate_checkpoint_roots(
+        model_cfg,
+        _CHECKPOINTS_DIR,
+        policy_dir=_POLICY_DIR,
+        explicit_keys=("model_path", "checkpoint_path"),
+    )
+    for checkpoint_root in roots:
+        selected = _select_pi05_dir(checkpoint_root, model_cfg)
+        if selected is not None:
+            return selected
+    if roots:
+        return roots[0]
+    raise ValueError("ckpt_name, model_path, or checkpoint_path is required for Spatial_Forcing.")
 
 
 class Model(ModelTemplate):

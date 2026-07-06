@@ -93,7 +93,7 @@ bash train.sh RoboDojo cotrain arx_x5 joint 0 0
 bash train.sh RoboDojo cotrain arx_x5 joint 0 0,1,2,3
 ```
 
-The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. Pass that full directory name as `ckpt_name` during evaluation.
+The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. During evaluation, `ckpt_name` may be the short run name from training (auto-combined into that directory name), the full run-directory name, or a path to a checkpoint directory.
 
 ## Deployment and Evaluation
 

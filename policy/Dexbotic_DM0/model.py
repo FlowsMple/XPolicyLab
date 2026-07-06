@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import decode_image_bit, get_robot_action_dim_info
 
 from .dm0_infer import load_dm0_infer
@@ -42,44 +43,45 @@ def _find_latest_checkpoint(run_dir: str) -> Optional[str]:
     return ckpts[-1]
 
 
-def _resolve_run_basename(model_cfg: dict) -> str:
-    """ckpt_name is the full run directory name under checkpoints/."""
-    return str(model_cfg.get("ckpt_name", ""))
-
-
-def _list_candidate_run_dirs(run_basename: str) -> list[str]:
-    candidates = [
-        os.path.join(_CHECKPOINTS_DIR, run_basename),
-        os.path.join(_CHECKPOINTS_DIR, f"{run_basename}_bak"),
-    ]
-    if os.path.isdir(_CHECKPOINTS_DIR):
-        prefix = f"{run_basename}-"
-        for entry in sorted(os.listdir(_CHECKPOINTS_DIR), key=lambda name: -os.path.getmtime(os.path.join(_CHECKPOINTS_DIR, name))):
+def _expand_candidate_run_dirs(candidate: str) -> list[str]:
+    """Per-policy fallback layer: for candidates that live directly under
+    checkpoints/, also try `<run>_bak` and mtime-ordered `<run>-*` prefix matches."""
+    variants = [candidate]
+    parent = os.path.dirname(candidate)
+    if os.path.abspath(parent) == os.path.abspath(_CHECKPOINTS_DIR) and os.path.isdir(_CHECKPOINTS_DIR):
+        bak = f"{candidate}_bak"
+        if bak not in variants:
+            variants.append(bak)
+        prefix = f"{os.path.basename(candidate)}-"
+        for entry in sorted(
+            os.listdir(_CHECKPOINTS_DIR),
+            key=lambda name: -os.path.getmtime(os.path.join(_CHECKPOINTS_DIR, name)),
+        ):
             path = os.path.join(_CHECKPOINTS_DIR, entry)
-            if entry.startswith(prefix) and os.path.isdir(path) and path not in candidates:
-                candidates.append(path)
-    return candidates
+            if entry.startswith(prefix) and os.path.isdir(path) and path not in variants:
+                variants.append(path)
+    return variants
 
 
 def _resolve_model_assets(model_cfg: dict) -> tuple[str, Optional[str]]:
-    model_path = _normalize_optional_path(model_cfg.get("model_path"))
     norm_stats_path = _normalize_optional_path(model_cfg.get("norm_stats_path"))
+    model_path: Optional[str] = None
     run_dir = None
 
-    if model_path:
-        latest = _find_latest_checkpoint(model_path)
-        if latest is not None:
-            run_dir = model_path if latest != model_path else os.path.dirname(model_path)
-            model_path = latest
-    else:
-        run_basename = _resolve_run_basename(model_cfg)
-
-        for candidate_run_dir in _list_candidate_run_dirs(run_basename):
-            candidate_model_path = _find_latest_checkpoint(candidate_run_dir)
-            if candidate_model_path is not None:
-                run_dir = candidate_run_dir
-                model_path = candidate_model_path
+    for candidate in candidate_checkpoint_roots(
+        model_cfg,
+        _CHECKPOINTS_DIR,
+        policy_dir=_POLICY_DIR,
+        explicit_keys=("model_path",),
+    ):
+        for candidate_run_dir in _expand_candidate_run_dirs(str(candidate)):
+            latest = _find_latest_checkpoint(candidate_run_dir)
+            if latest is not None:
+                run_dir = candidate_run_dir if latest != candidate_run_dir else os.path.dirname(candidate_run_dir)
+                model_path = latest
                 break
+        if model_path is not None:
+            break
 
     if model_path is None:
         raise FileNotFoundError(

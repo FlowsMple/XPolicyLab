@@ -24,6 +24,7 @@ from .openvla_oft.experiments.robot.openvla_utils import (
 )
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import build_run_dir_name, candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import (
     decode_image_bit,
     get_robot_action_dim_info,
@@ -137,10 +138,15 @@ def _resolve_dataset_stats_path(finetune_dir: Path | None) -> Path | None:
 
 
 def _build_ckpt_setting(model_cfg: dict[str, Any]) -> str | None:
-    # ckpt_name is the full run directory name under checkpoints/; an explicit
-    # ckpt_setting override still takes priority.
+    # ckpt_setting is the training run-dir name. An explicit ckpt_setting override
+    # takes priority; otherwise default to the shared 5-tuple run-dir name
+    # (matching train.sh's `${bench}-${ckpt}-${env}-${action}-${seed}`), falling
+    # back to the verbatim ckpt_name when the 5-tuple cannot be built.
     if model_cfg.get("ckpt_setting"):
         return str(model_cfg["ckpt_setting"])
+    run_dir_name = build_run_dir_name(model_cfg)
+    if run_dir_name is not None:
+        return run_dir_name
     ckpt_name = model_cfg.get("ckpt_name")
     if ckpt_name is None:
         return None
@@ -149,13 +155,13 @@ def _build_ckpt_setting(model_cfg: dict[str, Any]) -> str | None:
 
 def _build_tfds_dataset_name(model_cfg: dict[str, Any]) -> str | None:
     # An explicit tfds_dataset_name override still takes priority; otherwise
-    # derive from ckpt_name (the full run directory name).
+    # derive `aloha_<ckpt_setting>` (train.sh's default tfds naming).
     if model_cfg.get("tfds_dataset_name"):
         return str(model_cfg["tfds_dataset_name"])
-    ckpt_name = model_cfg.get("ckpt_name")
-    if ckpt_name is None:
+    ckpt_setting = _build_ckpt_setting(model_cfg)
+    if ckpt_setting is None:
         return None
-    return f"aloha_{ckpt_name}"
+    return f"aloha_{ckpt_setting}"
 
 
 def _resolve_unnorm_key(model_cfg: dict[str, Any], norm_stats: dict | None = None) -> str:
@@ -184,22 +190,28 @@ def _resolve_unnorm_key(model_cfg: dict[str, Any], norm_stats: dict | None = Non
     raise ValueError("unnorm_key, tfds_dataset_name, or ckpt_name is required for OpenVLA_OFT eval.")
 
 
+def _checkpoint_candidate_roots(model_cfg: dict[str, Any]) -> list[Path]:
+    # base_model_path is the frozen base VLA (always set in deploy.yml) and is
+    # handled as a low-priority fallback in _resolve_checkpoint_path, so it is
+    # deliberately not one of the fine-tune candidate roots here.
+    return candidate_checkpoint_roots(
+        model_cfg,
+        _CHECKPOINTS_DIR,
+        policy_dir=_POLICY_DIR,
+        explicit_keys=("checkpoint_path", "model_path"),
+    )
+
+
 def _resolve_finetune_dir(model_cfg: dict[str, Any]) -> Path | None:
-    ckpt_setting = _build_ckpt_setting(model_cfg)
-    ckpt_name = model_cfg.get("ckpt_name")
-    candidates: list[str] = []
-    for value in (ckpt_name, ckpt_setting):
-        if value and str(value) not in candidates:
-            candidates.append(str(value))
-    if not candidates:
+    roots = _checkpoint_candidate_roots(model_cfg)
+    if not roots:
         return None
 
     checkpoint_num = model_cfg.get("checkpoint_num")
     target_step = _extract_step_number(checkpoint_num) if checkpoint_num not in (None, "") else None
 
     existing_roots: list[Path] = []
-    for name in candidates:
-        checkpoint_root = _resolve_checkpoint_root(name)
+    for checkpoint_root in roots:
         if not checkpoint_root.is_dir():
             continue
         existing_roots.append(checkpoint_root)
@@ -213,13 +225,10 @@ def _resolve_finetune_dir(model_cfg: dict[str, Any]) -> Path | None:
             f"under: {existing_roots[0]}. Expected a merged checkpoint directory such as "
             "`<run_id>--<step>_chkpt`."
         )
-    if candidates:
-        checked = [_resolve_checkpoint_root(name) for name in candidates]
-        raise FileNotFoundError(
-            "Could not find OpenVLA_OFT checkpoint. Pass the full run directory name "
-            f"under checkpoints/ or a valid path. Checked: {[str(path) for path in checked]}"
-        )
-    return None
+    raise FileNotFoundError(
+        "Could not find OpenVLA_OFT checkpoint. Pass the full run directory name "
+        f"under checkpoints/ or a valid path. Checked: {[str(path) for path in roots]}"
+    )
 
 
 def _resolve_policy_path(value: str | None) -> Path | None:
@@ -233,43 +242,18 @@ def _resolve_policy_path(value: str | None) -> Path | None:
     return path
 
 
-def _resolve_checkpoint_root(name: str) -> Path:
-    path = Path(name).expanduser()
-    if path.is_absolute():
-        return path.resolve()
-    if path.parent != Path("."):
-        return (_POLICY_DIR / path).resolve()
-    return (_CHECKPOINTS_DIR / path).resolve()
-
-
 def _resolve_checkpoint_path(model_cfg: dict[str, Any]) -> str:
-    base_model_path = model_cfg.get("base_model_path")
-    explicit_checkpoint = model_cfg.get("checkpoint_path") or model_cfg.get("model_path")
-    if explicit_checkpoint:
-        path = Path(explicit_checkpoint).expanduser().resolve()
-        if (path / "config.json").exists():
-            return str(path)
-
     finetune_dir = _resolve_finetune_dir(model_cfg)
     if finetune_dir is not None and (finetune_dir / "config.json").exists():
         return str(finetune_dir)
 
-    resolved_base = _resolve_policy_path(base_model_path)
+    resolved_base = _resolve_policy_path(model_cfg.get("base_model_path"))
     if resolved_base is not None and (resolved_base / "config.json").exists():
         return str(resolved_base)
 
-    ckpt_setting = _build_ckpt_setting(model_cfg)
-    if ckpt_setting:
-        checkpoint_root = _resolve_checkpoint_root(ckpt_setting)
-        return str(checkpoint_root)
-
-    ckpt_name = model_cfg.get("ckpt_name")
-    if ckpt_name:
-        checkpoint_root = _resolve_checkpoint_root(str(ckpt_name))
-        return str(checkpoint_root)
-
-    if explicit_checkpoint:
-        return str(Path(explicit_checkpoint).expanduser().resolve())
+    roots = _checkpoint_candidate_roots(model_cfg)
+    if roots:
+        return str(roots[0])
     raise ValueError("ckpt_name, base_model_path, or checkpoint_path is required for OpenVLA_OFT.")
 
 @dataclass

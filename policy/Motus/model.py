@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import (
     decode_image_bit,
     get_robot_action_dim_info,
@@ -500,18 +501,19 @@ def resolve_motus_checkpoint(model_cfg: dict[str, Any]) -> str:
     if env_ckpt_setting:
         return str(resolve_motus_checkpoint_dir((_CHECKPOINTS_DIR / env_ckpt_setting).resolve()))
 
-    for key in ("ckpt_setting", "checkpoint_path", "model_path"):
-        explicit_path = _resolve_path(model_cfg.get(key))
-        if explicit_path is not None:
-            return str(resolve_motus_checkpoint_dir(explicit_path))
-
-    ckpt_name = model_cfg.get("ckpt_name")
-    if ckpt_name:
-        raw_ckpt_name = Path(str(ckpt_name)).expanduser()
-        if raw_ckpt_name.is_absolute() or "/" in str(ckpt_name):
-            return str(resolve_motus_checkpoint_dir(_resolve_path(ckpt_name)))
-
-        return str(resolve_motus_checkpoint_dir((_CHECKPOINTS_DIR / str(ckpt_name)).resolve()))
+    # Shared precedence below the env overrides: explicit path keys, ckpt_name as
+    # a path, the concatenated 5-tuple run-dir name, then checkpoints/<ckpt_name>.
+    roots = candidate_checkpoint_roots(
+        model_cfg,
+        _CHECKPOINTS_DIR,
+        policy_dir=_POLICY_DIR,
+        explicit_keys=("ckpt_setting", "checkpoint_path", "model_path"),
+    )
+    for root in roots:
+        if root.exists():
+            return str(resolve_motus_checkpoint_dir(root))
+    if roots:
+        return str(resolve_motus_checkpoint_dir(roots[0]))
 
     raise ValueError("ckpt_name, ckpt_setting, checkpoint_path, or model_path is required for Motus.")
 

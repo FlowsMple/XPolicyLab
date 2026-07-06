@@ -13,6 +13,7 @@ if _AGIBOT_DIR not in sys.path:
 from evaluate.deploy import GO1Infer
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import ckpt_name_is_path
 from XPolicyLab.utils.process_data import (
     get_robot_action_dim_info,
     pack_robot_state,
@@ -111,16 +112,30 @@ def _resolve_model_assets(model_cfg):
         elif os.path.basename(model_path).startswith("checkpoint-"):
             run_dir = os.path.dirname(model_path)
     else:
-        for run_basename in _candidate_run_basenames(model_cfg):
-            checked_run_names.append(run_basename)
-            for candidate_run_dir in _list_candidate_run_dirs(checkpoints_dir, run_basename):
-                candidate_model_path = _find_latest_checkpoint(candidate_run_dir)
-                if candidate_model_path is not None:
-                    run_dir = candidate_run_dir
-                    model_path = candidate_model_path
+        ckpt_name = model_cfg.get("ckpt_name")
+        if ckpt_name_is_path(ckpt_name):
+            ckpt_run_dir = os.path.expanduser(str(ckpt_name))
+            if not os.path.isabs(ckpt_run_dir):
+                ckpt_run_dir = os.path.join(_SCRIPT_DIR, ckpt_run_dir)
+            latest_ckpt = _find_latest_checkpoint(ckpt_run_dir)
+            if latest_ckpt is not None:
+                run_dir = ckpt_run_dir
+                model_path = latest_ckpt
+            elif os.path.basename(os.path.normpath(ckpt_run_dir)).startswith("checkpoint-"):
+                run_dir = os.path.dirname(os.path.normpath(ckpt_run_dir))
+                model_path = ckpt_run_dir
+
+        if model_path is None:
+            for run_basename in _candidate_run_basenames(model_cfg):
+                checked_run_names.append(run_basename)
+                for candidate_run_dir in _list_candidate_run_dirs(checkpoints_dir, run_basename):
+                    candidate_model_path = _find_latest_checkpoint(candidate_run_dir)
+                    if candidate_model_path is not None:
+                        run_dir = candidate_run_dir
+                        model_path = candidate_model_path
+                        break
+                if model_path is not None:
                     break
-            if model_path is not None:
-                break
 
     if data_stats_path is None:
         for candidate_dir in (run_dir, model_path):

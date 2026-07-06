@@ -49,16 +49,14 @@ _resolve_run_root() {
 
 ckpt_run_id="${GALAXEA_CKPT_RUN_ID:-$(xpolicylab_ckpt_run_id "${bench_name}" "${ckpt_name}" "${env_cfg_type}" "${action_type}" "${seed}")}"
 
-if [[ -d "${ckpt_name}" && "${ckpt_name}" == */* ]]; then
-    ckpt_path="${ckpt_name}"
-else
-    ckpt_path="$(xpolicylab_resolve_ckpt_dir "${SCRIPT_DIR}" "${bench_name}" "${ckpt_name}" \
-        "${env_cfg_type}" "${action_type}" "${seed}")"
-    if [[ ! -d "${ckpt_path}" ]]; then
-        echo -e "\033[31m[SERVER] ckpt not found: checkpoints/${ckpt_run_id}\033[0m" >&2
-        echo -e "\033[31m[SERVER] (eval args: dataset=${bench_name} ckpt_name=${ckpt_name} env=${env_cfg_type} action=${action_type} seed=${seed})\033[0m" >&2
-        exit 1
-    fi
+# Resolution precedence: ckpt_name-as-path (absolute or relative-with-'/'), then
+# the 5-tuple run dir under checkpoints/, then checkpoints/<ckpt_name> verbatim.
+ckpt_path="$(xpolicylab_resolve_ckpt_dir "${SCRIPT_DIR}" "${bench_name}" "${ckpt_name}" \
+    "${env_cfg_type}" "${action_type}" "${seed}")"
+if [[ ! -d "${ckpt_path}" ]]; then
+    echo -e "\033[31m[SERVER] ckpt not found: ${ckpt_path}\033[0m" >&2
+    echo -e "\033[31m[SERVER] (eval args: dataset=${bench_name} ckpt_name=${ckpt_name} env=${env_cfg_type} action=${action_type} seed=${seed})\033[0m" >&2
+    exit 1
 fi
 ckpt_path="$(cd "${ckpt_path}" && pwd)"
 ckpt_path="$(_resolve_run_root "${ckpt_path}")"

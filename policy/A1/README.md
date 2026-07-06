@@ -108,7 +108,7 @@ bash train.sh RoboDojo cotrain arx_x5 joint 0 0
 bash train.sh RoboDojo cotrain arx_x5 joint 0 0,1,2,3
 ```
 
-The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. Pass that full directory name as `ckpt_name` during evaluation.
+The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. During evaluation, `ckpt_name` may be the short run name from training (auto-combined into that directory name), the full run-directory name, or a path to a checkpoint directory.
 
 ## Deployment and Evaluation
 
@@ -254,6 +254,6 @@ Frequently used environment variables detected in the adapter scripts:
 
 - Keep `ckpt_name` stable between data processing, training, and evaluation. For data-size ablations, encode the subset in `ckpt_name` such as `stack_bowls_50ep`.
 - `task_name` is only the evaluation task; multi-task checkpoints can be evaluated on different tasks without renaming the checkpoint directory.
-- During evaluation, pass the full checkpoint run directory name as `ckpt_name` or set `MODEL_PATH` explicitly. A missing checkpoint now fails fast instead of silently loading the pretrain fallback.
+- During evaluation, `ckpt_name` may be the short run name (auto-combined into the run-dir name), the full checkpoint run directory name, or a path; or set `MODEL_PATH` explicitly. A missing checkpoint now fails fast instead of silently loading the pretrain fallback.
 - Prefer running `setup_eval_policy_server.sh` and `setup_eval_env_client.sh` separately when debugging dependency, CUDA, or model-loading issues.
 

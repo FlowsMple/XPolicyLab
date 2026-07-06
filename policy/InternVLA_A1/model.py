@@ -25,6 +25,7 @@ os.environ.setdefault("COSMOS_PATH", str((_CHECKPOINTS_DIR / "shared" / "Cosmos-
 os.environ.setdefault("QWEN3_2B_PATH", str((_CHECKPOINTS_DIR / "shared" / "Qwen3-VL-2B-Instruct").resolve()))
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import resolve_checkpoint_root
 from XPolicyLab.utils.process_data import (
     decode_image_bit,
     get_robot_action_dim_info,
@@ -170,11 +171,16 @@ def _resolve_internvla_ckpt_dir(model_cfg: dict[str, Any]) -> Path:
     if ckpt_path:
         return resolve_ckpt_dir(ckpt_path)
 
-    ckpt_name = model_cfg.get("ckpt_name")
-    if not ckpt_name:
-        raise ValueError("ckpt_name or ckpt_path is required for InternVLA_A1.")
-
-    checkpoint_root = (_CHECKPOINTS_DIR / str(ckpt_name)).expanduser().resolve()
+    # Shared precedence: explicit path keys > ckpt_name-as-path > 5-tuple
+    # concat under checkpoints/ > checkpoints/<ckpt_name> verbatim. The
+    # within-root step-dir (pretrained_model) discovery below is preserved.
+    checkpoint_root = resolve_checkpoint_root(
+        model_cfg,
+        _CHECKPOINTS_DIR,
+        policy_dir=_CUR_DIR,
+        explicit_keys=("model_dir", "model_path"),
+        must_exist=False,
+    ).expanduser().resolve()
     if not checkpoint_root.is_dir():
         raise FileNotFoundError(f"Checkpoint root not found: {checkpoint_root}")
 

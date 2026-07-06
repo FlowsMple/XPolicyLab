@@ -19,6 +19,7 @@ for _path in (str(_REPO_ROOT), str(_LEROBOT_SRC), str(_LEROBOT_ROOT)):
         sys.path.insert(0, _path)
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import (
     decode_image_bit,
     get_robot_action_dim_info,
@@ -130,22 +131,6 @@ def _extract_step_number(value: Any) -> int | None:
     return int(digits) if digits else None
 
 
-def _resolve_checkpoint_root(model_cfg: dict[str, Any]) -> Path:
-    ckpt_name = model_cfg.get("ckpt_name")
-    if ckpt_name:
-        ckpt_path = Path(str(ckpt_name)).expanduser()
-        if ckpt_path.is_absolute() or ckpt_path.parent != Path("."):
-            return ckpt_path.resolve()
-        return (_CHECKPOINTS_DIR / ckpt_path).resolve()
-
-    for key in ("pretrained_path", "model_path", "checkpoint_path"):
-        value = model_cfg.get(key)
-        if value:
-            return Path(value).expanduser().resolve()
-
-    raise FileNotFoundError("ckpt_name or checkpoint_path is required for MolmoACT2.")
-
-
 def encode_obs(
     observation: dict[str, Any],
     action_type: str,
@@ -173,7 +158,7 @@ class Model(ModelTemplate):
         self.robot_action_dim_info = get_robot_action_dim_info(env_cfg) if env_cfg is not None else None
         self.default_prompt = self.model_cfg.get("prompt") or self.task_name
         self.device = self._get_device(self.model_cfg.get("device", "cuda"))
-        self.pretrained_path = self._resolve_pretrained_path(_resolve_checkpoint_root(self.model_cfg))
+        self.pretrained_path = self._resolve_pretrained_path_from_candidates()
         self.policy = self._load_policy()
         self.image_keys = list(getattr(self.policy.config, "image_keys", []))
         self.actions_per_chunk = self._resolve_actions_per_chunk()
@@ -206,6 +191,23 @@ class Model(ModelTemplate):
                 raise ValueError(f"actions_per_chunk must be positive, got {resolved}")
             return resolved
         raise ValueError("Failed to resolve actions_per_chunk from model config or policy config.")
+
+    def _resolve_pretrained_path_from_candidates(self) -> str:
+        candidates = candidate_checkpoint_roots(
+            self.model_cfg,
+            _CHECKPOINTS_DIR,
+            policy_dir=_CUR_DIR,
+            explicit_keys=("pretrained_path", "model_path", "checkpoint_path"),
+        )
+        last_error: FileNotFoundError | None = None
+        for checkpoint_root in candidates:
+            try:
+                return self._resolve_pretrained_path(checkpoint_root)
+            except FileNotFoundError as error:
+                last_error = error
+        if last_error is not None:
+            raise last_error
+        raise FileNotFoundError("ckpt_name, pretrained_path, or model_path is required for MolmoACT2.")
 
     def _resolve_pretrained_path(self, checkpoint_root: Path) -> str:
         artifact_root = checkpoint_root

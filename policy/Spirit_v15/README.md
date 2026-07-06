@@ -99,7 +99,7 @@ bash train.sh RoboDojo cotrain arx_x5 joint 0 0
 bash train.sh RoboDojo cotrain arx_x5 joint 0 0,1,2,3
 ```
 
-The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. Pass that full directory name as `ckpt_name` during evaluation.
+The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. During evaluation, `ckpt_name` may be the short run name from training (auto-combined into that directory name), the full run-directory name, or a path to a checkpoint directory.
 
 Spirit training writes `model.safetensors` into the run directory. The eval adapter also needs a compatible `config.json`; by default it links this from `checkpoints/shared/Spirit-v1.5/config.json` via `spirit_base_weights` in `deploy.yml`. Before evaluation, either place the Spirit base checkpoint there or override `spirit_base_weights`/`checkpoint_path` with a directory that already contains both `config.json` and `model.safetensors`.
 

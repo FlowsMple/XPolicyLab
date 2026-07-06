@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import get_robot_action_dim_info, pack_robot_state, unpack_robot_state
 
 
@@ -36,20 +37,22 @@ def _resolve_latest_step_dir(run_dir: str) -> str:
 
 
 def _resolve_model_path(model_cfg: dict[str, Any]) -> str:
-    model_path = model_cfg.get("model_path")
-    if model_path:
-        return _resolve_latest_step_dir(model_path)
+    checkpoints_dir = os.path.join(_SCRIPT_DIR, "checkpoints")
+    candidates = candidate_checkpoint_roots(
+        model_cfg,
+        checkpoints_dir,
+        policy_dir=_SCRIPT_DIR,
+        explicit_keys=("model_path",),
+    )
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return _resolve_latest_step_dir(str(candidate))
 
-    # ckpt_name is the full run directory name under checkpoints/.
-    ckpt_name = model_cfg.get("ckpt_name")
-    if ckpt_name is None:
-        raise ValueError("deploy config must provide model_path or ckpt_name.")
-
-    run_id = str(ckpt_name)
-    candidate = os.path.join(_SCRIPT_DIR, "checkpoints", run_id)
-    if not os.path.isdir(candidate):
-        raise ValueError(f"checkpoint run dir not found: {candidate}")
-    return _resolve_latest_step_dir(candidate)
+    checked = "\n  ".join(str(path) for path in candidates) or "  <no checkpoint candidates>"
+    raise ValueError(
+        "checkpoint run dir not found. Provide model_path or a valid ckpt_name "
+        f"(full run-dir name or a path).\nChecked:\n  {checked}"
+    )
 
 
 class Model(ModelTemplate):

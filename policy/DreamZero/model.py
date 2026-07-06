@@ -12,6 +12,7 @@ import torch.distributed as dist
 from tianshou.data import Batch
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import (
     get_robot_action_dim_info,
     pack_robot_state,
@@ -136,28 +137,27 @@ def _latest_checkpoint(run_dir: Path) -> Path | None:
     return checkpoints[-1]
 
 
-def _candidate_run_dirs(checkpoints_dir: Path, run_basename: str) -> list[Path]:
-    candidates: list[Path] = []
+def _expand_run_dir_variants(candidate: Path) -> list[Path]:
+    """Per-policy fallback layer applied to each shared checkpoint-root candidate:
+    honor a `<name>.latest` sidecar file and mtime-ordered `<name>-*` prefix matches
+    for candidates that live directly under checkpoints/."""
+    variants: list[Path] = []
 
-    latest_file = checkpoints_dir / f"{run_basename}.latest"
+    latest_file = candidate.parent / f"{candidate.name}.latest"
     if latest_file.is_file():
         latest_dir = Path(latest_file.read_text(encoding="utf-8").strip()).expanduser()
         if latest_dir.is_dir():
-            candidates.append(latest_dir)
+            variants.append(latest_dir)
 
-    preferred_dir = checkpoints_dir / run_basename
-    if preferred_dir.is_dir() and preferred_dir not in candidates:
-        candidates.append(preferred_dir)
+    variants.append(candidate)
 
-    prefix = f"{run_basename}-"
-    if checkpoints_dir.is_dir():
-        legacy_dirs = [p for p in checkpoints_dir.iterdir() if p.is_dir() and p.name.startswith(prefix)]
+    if candidate.parent == CHECKPOINTS_DIR.resolve() and CHECKPOINTS_DIR.is_dir():
+        prefix = f"{candidate.name}-"
+        legacy_dirs = [p for p in CHECKPOINTS_DIR.iterdir() if p.is_dir() and p.name.startswith(prefix)]
         legacy_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        for path in legacy_dirs:
-            if path not in candidates:
-                candidates.append(path)
+        variants.extend(legacy_dirs)
 
-    return candidates
+    return variants
 
 
 def _resolve_model_path(model_cfg: dict[str, Any]) -> Path:
@@ -167,13 +167,16 @@ def _resolve_model_path(model_cfg: dict[str, Any]) -> Path:
         resolved = _latest_checkpoint(explicit_path)
         return (resolved or explicit_path).resolve()
 
-    run_basename = str(model_cfg.get("ckpt_name", ""))
-    checkpoints_dir = CHECKPOINTS_DIR
-
-    for candidate in _candidate_run_dirs(checkpoints_dir, run_basename):
-        resolved = _latest_checkpoint(candidate)
-        if resolved is not None:
-            return resolved.resolve()
+    for candidate in candidate_checkpoint_roots(
+        model_cfg,
+        CHECKPOINTS_DIR,
+        policy_dir=SCRIPT_DIR,
+        explicit_keys=("model_path",),
+    ):
+        for run_dir in _expand_run_dir_variants(candidate):
+            resolved = _latest_checkpoint(run_dir)
+            if resolved is not None:
+                return resolved.resolve()
 
     pretrained_model_path = model_cfg.get("pretrained_model_path")
     if pretrained_model_path:

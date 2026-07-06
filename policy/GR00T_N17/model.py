@@ -12,6 +12,7 @@ import numpy as np
 
 from XPolicyLab.model_template import ModelTemplate
 from XPolicyLab.utils.process_data import decode_image_bit
+from XPolicyLab.utils.checkpoint_resolver import resolve_checkpoint_root
 
 _POLICY_DIR = Path(__file__).resolve().parent
 _GR00T_ROOT = _POLICY_DIR / "gr00t_n17"
@@ -123,11 +124,14 @@ def _override_processor_cosmos_model(checkpoint_dir: Path, cosmos_model: str) ->
 
 
 def _resolve_checkpoint_dir(model_cfg: dict[str, Any]) -> Path:
-    if model_cfg.get("model_dir"):
-        return _resolve_relative_path(model_cfg["model_dir"], _POLICY_DIR)
-
-    ckpt_setting = str(model_cfg["ckpt_name"])
-    root = (_CHECKPOINTS_DIR / ckpt_setting).resolve()
+    # Shared precedence: model_dir key > ckpt_name-as-path >
+    # {bench}-{ckpt}-{env}-{action}-{seed} concat > checkpoints/<ckpt_name>.
+    root = resolve_checkpoint_root(
+        model_cfg,
+        _CHECKPOINTS_DIR,
+        policy_dir=_POLICY_DIR,
+        explicit_keys=("model_dir",),
+    )
     if not root.is_dir():
         raise FileNotFoundError(f"Checkpoint root not found: {root}")
 

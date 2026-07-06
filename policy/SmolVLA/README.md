@@ -76,7 +76,7 @@ bash train.sh RoboDojo cotrain arx_x5 joint 0 0
 bash train.sh RoboDojo cotrain arx_x5 joint 0 0,1,2,3
 ```
 
-The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. Pass that full directory name as `ckpt_name` during evaluation. For example, training with `bash train.sh RoboDojo cotrain arx_x5 joint 0 0` is evaluated with `ckpt_name=RoboDojo-cotrain-arx_x5-joint-0`.
+The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. During evaluation, `ckpt_name` may be the short run name from training (auto-combined into that directory name), the full run-directory name, or a path to a checkpoint directory. For example, training with `bash train.sh RoboDojo cotrain arx_x5 joint 0 0` is evaluated with `ckpt_name=RoboDojo-cotrain-arx_x5-joint-0`.
 
 To evaluate a specific LeRobot training step, set `checkpoint_num` in `deploy.yml` or pass it as a server override. The adapter resolves step artifacts under `checkpoints/<run>/checkpoints/<step>/pretrained_model/`; if no `checkpoint_num` is provided, it prefers the latest numeric step when present and otherwise falls back to `checkpoints/<run>/checkpoints/last/pretrained_model/`.
 
@@ -205,6 +205,6 @@ Frequently used environment variables detected in the adapter scripts:
 
 ## Notes
 
-- Keep the training `ckpt_name` stable when naming runs. During evaluation, pass the full checkpoint directory name under `checkpoints/`, such as `RoboDojo-stack_bowls_50ep-arx_x5-joint-0`.
+- Keep the training `ckpt_name` stable when naming runs. During evaluation, `ckpt_name` may be the short run name (auto-combined into the run-dir name), the full checkpoint directory name under `checkpoints/` such as `RoboDojo-stack_bowls_50ep-arx_x5-joint-0`, or a path to a checkpoint directory.
 - `task_name` is only the evaluation task; multi-task checkpoints can be evaluated on different tasks without renaming the checkpoint directory.
 - Prefer running `setup_eval_policy_server.sh` and `setup_eval_env_client.sh` separately when debugging dependency, CUDA, or model-loading issues.

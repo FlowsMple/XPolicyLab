@@ -21,8 +21,29 @@ yaml_file="${XPL_ROOT}/policy/${policy_name}/deploy.yml"
 
 apptainer_image="${AHA_WAM_APPTAINER_IMAGE:-}"
 elava_root="${AHA_WAM_ELAVA_ROOT:-${SCRIPT_DIR}/AHAWAM}"
+# Shared checkpoint run-dir precedence (POLICY_DIR = policy dir,
+# CKPT_ROOT = its checkpoints dir):
+#   1. AHA_WAM_CKPT_SETTING explicit override (CKPT_ROOT/<setting>)
+#   2. ckpt_name as an absolute path
+#   3. ckpt_name as a relative path (POLICY_DIR-relative)
+#   4. 5-tuple concat run-dir under checkpoints/
+#   5. checkpoints/<ckpt_name> verbatim (backward compatible)
+# AHA_WAM_CHECKPOINT_PATH still overrides the final weights file below.
+POLICY_DIR="${SCRIPT_DIR}"
+CKPT_ROOT="${SCRIPT_DIR}/checkpoints"
 ckpt_setting="${AHA_WAM_CKPT_SETTING:-${ckpt_name}}"
-run_dir="${SCRIPT_DIR}/checkpoints/${ckpt_setting}"
+run_dir_name="${bench_name}-${ckpt_name}-${env_cfg_type}-${action_type}-${seed}"
+if [[ -n "${AHA_WAM_CKPT_SETTING:-}" ]]; then
+    run_dir="${CKPT_ROOT}/${ckpt_setting}"
+elif [[ "${ckpt_name}" == /* ]]; then
+    run_dir="${ckpt_name}"
+elif [[ "${ckpt_name}" == */* ]]; then
+    run_dir="${POLICY_DIR}/${ckpt_name}"
+elif [[ -d "${CKPT_ROOT}/${run_dir_name}" ]]; then
+    run_dir="${CKPT_ROOT}/${run_dir_name}"
+else
+    run_dir="${CKPT_ROOT}/${ckpt_setting}"
+fi
 checkpoint_path="${AHA_WAM_CHECKPOINT_PATH:-}"
 dataset_stats_path="${AHA_WAM_DATASET_STATS_PATH:-}"
 diffsynth_model_base_path="${DIFFSYNTH_MODEL_BASE_PATH:-}"

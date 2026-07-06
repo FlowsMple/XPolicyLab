@@ -73,7 +73,7 @@ bash train.sh RoboDojo cotrain arx_x5 ee 0 0
 bash train.sh RoboDojo cotrain arx_x5 ee 0 0,1,2,3
 ```
 
-`train.sh` requires `XVLA_MODEL_PATH` to point to the pretrained X-VLA base model. Prefer a local directory so the script can copy processor/tokenizer files into each saved `ckpt-*` directory. The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`; pass that full directory name as `ckpt_name` during evaluation.
+`train.sh` requires `XVLA_MODEL_PATH` to point to the pretrained X-VLA base model. Prefer a local directory so the script can copy processor/tokenizer files into each saved `ckpt-*` directory. The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. During evaluation, `ckpt_name` may be the short run name from training (auto-combined into that directory name), the full run-directory name, or a path to a checkpoint directory.
 
 ## Deployment and Evaluation
 

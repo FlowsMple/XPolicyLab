@@ -14,6 +14,7 @@ from diffusion_policy.workspace.robotworkspace import RobotWorkspace
 from diffusion_policy.env_runner.dp_runner import DPRunner
 from XPolicyLab.model_template import ModelTemplate
 from XPolicyLab.utils.process_data import pack_robot_state, unpack_robot_state, get_robot_action_dim_info, get_action_dim
+from XPolicyLab.utils.checkpoint_resolver import resolve_checkpoint_root
 
 class Model(ModelTemplate):
 
@@ -36,8 +37,13 @@ class Model(ModelTemplate):
         self._latest_env_idx_list = None
 
     def get_model(self, model_cfg):
-        ckpt_setting = str(model_cfg['ckpt_name'])
-        ckpt_file = self._resolve_checkpoint_file(ckpt_setting, model_cfg.get('checkpoint_num', 'latest'))
+        ckpt_dir = resolve_checkpoint_root(
+            model_cfg,
+            os.path.join(parent_dir, "checkpoints"),
+            policy_dir=parent_dir,
+            must_exist=False,
+        )
+        ckpt_file = self._resolve_checkpoint_file(ckpt_dir, model_cfg.get('checkpoint_num', 'latest'))
 
         # load checkpoint and workspace
         payload = torch.load(open(ckpt_file, "rb"), pickle_module=dill)
@@ -58,8 +64,8 @@ class Model(ModelTemplate):
         
         return policy
 
-    def _resolve_checkpoint_file(self, ckpt_setting, checkpoint_num):
-        ckpt_dir = os.path.join(parent_dir, "checkpoints", ckpt_setting)
+    def _resolve_checkpoint_file(self, ckpt_dir, checkpoint_num):
+        ckpt_dir = os.fspath(ckpt_dir)
         checkpoint_num = "latest" if checkpoint_num is None else str(checkpoint_num)
 
         if checkpoint_num.lower() not in {"", "latest", "none"}:

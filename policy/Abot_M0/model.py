@@ -22,6 +22,7 @@ from ABot.model.framework.base_framework import baseframework
 from deployment.model_server.tools.image_tools import to_pil_preserve
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import (
     decode_image_bit,
     get_robot_action_dim_info,
@@ -241,41 +242,26 @@ def _resolve_checkpoint_path(model_cfg: dict[str, Any]) -> Path:
     else:
         step_name = "steps_60000_pytorch_model.pt"
 
-    for key in ("checkpoint_path", "ckpt_path", "pretrained_path"):
-        value = model_cfg.get(key)
-        if value:
-            explicit_path = Path(value).expanduser().resolve()
-            explicit_candidates = (
-                explicit_path / "checkpoints" / step_name,
-                explicit_path / step_name,
-                explicit_path,
-            )
-            selected = next((candidate for candidate in explicit_candidates if candidate.is_file()), explicit_path)
-            return selected
-
-    ckpt_names: list[str] = []
-    raw_ckpt_name = model_cfg.get("ckpt_name")
-    if raw_ckpt_name not in (None, ""):
-        ckpt_names.append(str(raw_ckpt_name))
-
-    bench_name = model_cfg.get("bench_name") or model_cfg.get("dataset_name")
-    standard_keys = (bench_name, model_cfg.get("ckpt_name"), model_cfg.get("env_cfg_type"), model_cfg.get("action_type"), model_cfg.get("seed"))
-    if all(value not in (None, "") for value in standard_keys):
-        ckpt_names.append("-".join(str(value) for value in standard_keys))
+    roots: list[Path] = []
+    seen_roots: set[str] = set()
+    for checkpoints_dir in _CHECKPOINTS_DIRS:
+        for root in candidate_checkpoint_roots(
+            model_cfg,
+            checkpoints_dir,
+            policy_dir=_CUR_DIR,
+            explicit_keys=("checkpoint_path", "ckpt_path", "pretrained_path"),
+        ):
+            key = str(root)
+            if key not in seen_roots:
+                seen_roots.add(key)
+                roots.append(root)
 
     seen_candidates: list[Path] = []
-    for ckpt_setting in dict.fromkeys(ckpt_names):
-        raw_path = Path(ckpt_setting).expanduser()
-        candidate_dirs = []
-        if raw_path.is_absolute() or raw_path.parent != Path("."):
-            candidate_dirs.append(raw_path.resolve())
-        candidate_dirs.extend(checkpoints_dir.expanduser().resolve() / ckpt_setting for checkpoints_dir in _CHECKPOINTS_DIRS)
-
-        for ckpt_dir in candidate_dirs:
-            for candidate in (ckpt_dir / "checkpoints" / step_name, ckpt_dir / step_name, ckpt_dir):
-                seen_candidates.append(candidate)
-                if candidate.is_file():
-                    return candidate
+    for ckpt_dir in roots:
+        for candidate in (ckpt_dir / "checkpoints" / step_name, ckpt_dir / step_name, ckpt_dir):
+            seen_candidates.append(candidate)
+            if candidate.is_file():
+                return candidate
 
     raise FileNotFoundError(
         "Could not resolve ABot checkpoint. Provide ckpt_name or checkpoint_path. "

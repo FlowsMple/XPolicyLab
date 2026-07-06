@@ -20,8 +20,21 @@ policy_name="$(basename "${SCRIPT_DIR}")"
 yaml_file="${XPL_ROOT}/policy/${policy_name}/deploy.yml"
 
 action_dim=$(bash "${UTILS_DIR}/get_action_dim.sh" "${BENCH_ROOT}" "${env_cfg_type}")
-# ckpt_name is the full run directory name under checkpoints/.
-ckpt_root="${SCRIPT_DIR}/checkpoints/${ckpt_name}"
+# Run-dir resolution precedence (highest first): ckpt_name as an absolute path,
+# ckpt_name as a relative path (containing '/', resolved under this policy dir),
+# the 5-tuple run dir <bench>-<ckpt>-<env>-<action>-<seed> under checkpoints/,
+# then checkpoints/<ckpt_name> verbatim.
+CKPT_ROOT="${SCRIPT_DIR}/checkpoints"
+ckpt_run_id="${bench_name}-${ckpt_name}-${env_cfg_type}-${action_type}-${seed}"
+if [[ "${ckpt_name}" == /* ]]; then
+    ckpt_root="${ckpt_name}"
+elif [[ "${ckpt_name}" == */* ]]; then
+    ckpt_root="${SCRIPT_DIR}/${ckpt_name}"
+elif [[ -d "${CKPT_ROOT}/${ckpt_run_id}" ]]; then
+    ckpt_root="${CKPT_ROOT}/${ckpt_run_id}"
+else
+    ckpt_root="${CKPT_ROOT}/${ckpt_name}"
+fi
 
 # train.sh writes a series of `checkpoint-<step>` directories under ckpt_root;
 # always evaluate the most recent one.

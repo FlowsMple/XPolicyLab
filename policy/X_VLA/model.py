@@ -20,6 +20,7 @@ for _path in (str(_REPO_ROOT), str(_CUR_DIR), str(_XVLA_ROOT)):
         sys.path.insert(0, _path)
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import resolve_checkpoint_root
 from XPolicyLab.utils.process_data import decode_image_bit, get_robot_action_dim_info
 
 from xvla.models.modeling_xvla import XVLA
@@ -122,9 +123,21 @@ def _resolve_path(value: str | None) -> Path | None:
 
 
 def _resolve_checkpoint_root(model_cfg: dict[str, Any]) -> Path | None:
-    ckpt_name = model_cfg.get("ckpt_name")
-    if ckpt_name:
-        checkpoint_root = (_CHECKPOINTS_DIR / str(ckpt_name)).expanduser().resolve()
+    # Shared precedence: explicit path keys > ckpt_name-as-path > 5-tuple
+    # concat under checkpoints/ > checkpoints/<ckpt_name> verbatim. The
+    # within-root step-dir discovery and the processor/base-model candidate
+    # discovery (_build_candidate_dirs) are preserved. processor_path is the
+    # base-model fallback, not a run-dir override, so it is only used when no
+    # ckpt_name / model_path / checkpoint_path was given.
+    explicit_keys = ("model_path", "checkpoint_path")
+    if model_cfg.get("ckpt_name") or any(model_cfg.get(key) for key in explicit_keys):
+        checkpoint_root = resolve_checkpoint_root(
+            model_cfg,
+            _CHECKPOINTS_DIR,
+            policy_dir=_CUR_DIR,
+            explicit_keys=explicit_keys,
+            must_exist=False,
+        )
         if not checkpoint_root.is_dir():
             return checkpoint_root
 
@@ -157,11 +170,7 @@ def _resolve_checkpoint_root(model_cfg: dict[str, Any]) -> Path | None:
             return max(numeric_dirs, key=lambda candidate: _extract_step_number(candidate.name) or -1)
         return candidate_dirs[0]
 
-    for key in ("model_path", "checkpoint_path", "processor_path"):
-        resolved = _resolve_path(model_cfg.get(key))
-        if resolved is not None:
-            return resolved
-    return None
+    return _resolve_path(model_cfg.get("processor_path"))
 
 
 def _build_candidate_dirs(checkpoint_root: Path | None, *explicit_paths: str | None) -> list[Path]:

@@ -29,7 +29,9 @@ ckpt_root="$(xpolicylab_resolve_ckpt_dir "${SCRIPT_DIR}" "${bench_name}" "${ckpt
     "${env_cfg_type}" "${action_type}" "${seed}")"
 ckpt_root_rel="${ckpt_root#${SCRIPT_DIR}/}"
 policy_root_rel="${ckpt_root_rel}/Policy_offline_release/Policy_offline_release"
-policy_root="${SCRIPT_DIR}/${policy_root_rel}"
+# Derive the stage-layout root from the absolute ckpt_root so it stays correct
+# even when ckpt_name is an out-of-tree path (ckpt_root_rel is then absolute).
+policy_root="${ckpt_root}/Policy_offline_release/Policy_offline_release"
 config_name="${RISE_CONFIG_NAME:-Policy_offline_release}"
 default_prompt="${RISE_DEFAULT_PROMPT:-stack the bowls}"
 asset_id="${RISE_ASSET_ID:-}"

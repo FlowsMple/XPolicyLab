@@ -36,10 +36,22 @@ additional_info="ckpt_name=${ckpt_name},action_type=${action_type}"
 #   LINGBOT_VA_CHECKPOINT_PATH  point straight at a ckpt dir (skips the above)
 #   LINGBOT_VA_STEP             pin a specific step (consumed by prepare_merged_ckpt.py)
 # ---------------------------------------------------------------------------
+# Shared checkpoint-dir precedence (POLICY_DIR = SCRIPT_DIR,
+# CKPT_ROOT = SCRIPT_DIR/checkpoints):
+#   1. LINGBOT_VA_CHECKPOINT_PATH explicit override
+#   2. ckpt_name as an absolute path
+#   3. ckpt_name as a relative path (POLICY_DIR-relative)
+#   4. 5-tuple concat run-dir under checkpoints/
+#   5. checkpoints/<ckpt_name> verbatim (backward compatible)
+run_dir_name="${bench_name}-${ckpt_name}-${env_cfg_type}-${action_type}-${seed}"
 if [[ -n "${LINGBOT_VA_CHECKPOINT_PATH:-}" ]]; then
     VA_CHECKPOINT_PATH="${LINGBOT_VA_CHECKPOINT_PATH}"
-elif [[ "${ckpt_name}" = /* ]]; then
+elif [[ "${ckpt_name}" == /* ]]; then
     VA_CHECKPOINT_PATH="${ckpt_name}"
+elif [[ "${ckpt_name}" == */* ]]; then
+    VA_CHECKPOINT_PATH="${SCRIPT_DIR}/${ckpt_name}"
+elif [[ -d "${SCRIPT_DIR}/checkpoints/${run_dir_name}" ]]; then
+    VA_CHECKPOINT_PATH="${SCRIPT_DIR}/checkpoints/${run_dir_name}"
 else
     VA_CHECKPOINT_PATH="${SCRIPT_DIR}/checkpoints/${ckpt_name}"
 fi

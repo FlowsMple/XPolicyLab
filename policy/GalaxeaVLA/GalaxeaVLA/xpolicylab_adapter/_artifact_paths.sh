@@ -21,9 +21,21 @@ xpolicylab_resolve_dataset_dir() {
     echo "${policy_dir}/data/${std_tag}-lerobot"
 }
 
+# Resolution precedence (highest first): ckpt_name as an absolute path, ckpt_name
+# as a relative path (containing '/', resolved under the policy dir), the 5-tuple
+# run dir under checkpoints/, then checkpoints/<ckpt_name> verbatim. Explicit
+# env/deploy overrides are handled by the caller and stay highest of all.
 xpolicylab_resolve_ckpt_dir() {
     local policy_dir=$1 bench_name=$2 ckpt_name=$3 env_cfg_type=$4 action_type=$5 seed=$6
     local std_dir
+    if [[ "${ckpt_name}" == /* ]]; then
+        echo "${ckpt_name}"
+        return 0
+    fi
+    if [[ "${ckpt_name}" == */* ]]; then
+        echo "${policy_dir}/${ckpt_name}"
+        return 0
+    fi
     std_dir="${policy_dir}/checkpoints/$(xpolicylab_ckpt_run_id "${bench_name}" "${ckpt_name}" "${env_cfg_type}" "${action_type}" "${seed}")"
     if [[ -d "${std_dir}" ]]; then
         echo "${std_dir}"

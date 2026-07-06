@@ -13,6 +13,7 @@ from PIL import Image
 from transformers import AutoProcessor
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import resolve_checkpoint_root
 from XPolicyLab.utils.process_data import decode_image_bit, get_robot_action_dim_info
 
 _POLICY_DIR = Path(__file__).resolve().parent
@@ -88,16 +89,17 @@ def _resolve_processor_source(model_cfg: dict[str, Any]) -> str | Path:
     )
 
 
-def _resolve_ckpt_setting(model_cfg: dict[str, Any]) -> str:
-    return str(model_cfg["ckpt_name"])
-
-
 def _resolve_ckpt_dir(model_cfg: dict[str, Any]) -> Path:
-    if model_cfg.get("model_dir"):
-        return _resolve_relative_path(model_cfg["model_dir"], _POLICY_DIR)
-
-    ckpt_setting = _resolve_ckpt_setting(model_cfg)
-    return (_CHECKPOINTS_DIR / ckpt_setting).resolve()
+    # Shared precedence: model_dir key > ckpt_name-as-path >
+    # {bench}-{ckpt}-{env}-{action}-{seed} concat > checkpoints/<ckpt_name>.
+    # Existence is validated by the caller (keeps the artifact/tag error path).
+    return resolve_checkpoint_root(
+        model_cfg,
+        _CHECKPOINTS_DIR,
+        policy_dir=_POLICY_DIR,
+        explicit_keys=("model_dir",),
+        must_exist=False,
+    )
 
 
 def _strip_prefix(state_dict: dict[str, torch.Tensor], prefix: str) -> dict[str, torch.Tensor]:

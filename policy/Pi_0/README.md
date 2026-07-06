@@ -100,7 +100,7 @@ bash train.sh RoboDojo cotrain arx_x5 joint 0 0
 bash train.sh RoboDojo cotrain arx_x5 joint 0 0,1,2,3
 ```
 
-The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. Pass that full directory name as `ckpt_name` during evaluation.
+The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. During evaluation, `ckpt_name` may be the short run name from training (auto-combined into that directory name), the full run-directory name, or a path to a checkpoint directory.
 
 Before training, make sure normalization stats are available at `openpi/assets/RoboDojo_assets/arx_x5_sim/norm_stats.json`, or set `OPENPI_ROBODOJO_ASSETS_DIR` to a directory that contains `arx_x5_sim/norm_stats.json`. To train against an existing LeRobot repo instead of the default `<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>`, set `OPENPI_DATA_REPO_ID`.
 

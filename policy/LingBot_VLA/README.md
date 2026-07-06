@@ -94,7 +94,7 @@ bash train.sh RoboDojo cotrain arx_x5 joint 0 0
 bash train.sh RoboDojo cotrain arx_x5 joint 0 0,1,2,3
 ```
 
-The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. Pass that full directory name as `ckpt_name` during evaluation.
+The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. During evaluation, `ckpt_name` may be the short run name from training (auto-combined into that directory name), the full run-directory name, or a path to a checkpoint directory.
 
 By default `train.sh` uses `lingbot_vla/configs/vla/robotwin_load20000h.yaml`, writes to `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`, and reads data from `${LINGBOT_VLA_DATA_PATH}` or `${LEROBOT_DATA_ROOT}/${LEROBOT_DATASET_REPO_ID}`. Set `LINGBOT_VLA_CONFIG_PATH`, `LINGBOT_VLA_DATA_PATH`, `LEROBOT_DATASET_REPO_ID`, `LINGBOT_VLA_MODEL_PATH`, `LINGBOT_VLA_TOKENIZER_PATH`, and `LINGBOT_VLA_NORM_STATS_FILE` as needed before running real training.
 

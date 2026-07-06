@@ -82,7 +82,7 @@ bash train.sh RoboDojo cotrain arx_x5 joint 0 0
 bash train.sh RoboDojo cotrain arx_x5 joint 0 0,1,2,3
 ```
 
-The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. Pass that full directory name as `ckpt_name` during evaluation.
+The usual checkpoint directory is `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/`. During evaluation, `ckpt_name` may be the short run name from training (auto-combined into that directory name), the full run-directory name, or a path to a checkpoint directory.
 
 `train.sh` and `deploy.yml` expect the shared model assets at `checkpoints/shared/Cosmos-Tokenizer-CI8x8` and `checkpoints/shared/Qwen3-VL-2B-Instruct` by default. If those assets live elsewhere, export `COSMOS_PATH` and `QWEN3_2B_PATH`, or set `cosmos_path` and `qwen3_2b_path` in `deploy.yml` before training/evaluation.
 

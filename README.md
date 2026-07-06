@@ -133,7 +133,7 @@ policy/<POLICY>/
 | --- | --- |
 | `bench_name` | Dataset / benchmark family, usually `RoboDojo`. |
 | `task_name` | Evaluation task, for example `stack_bowls`. |
-| `ckpt_name` | Data/run/checkpoint identifier. |
+| `ckpt_name` | Run/checkpoint identifier. May be a short run name (combined with the other args into the run-dir name below), the full run-dir name, or a path to a checkpoint directory. |
 | `env_cfg_type` | Robot/environment config, for example `arx_x5`. |
 | `action_type` | Action representation, for example `joint` or `ee`. |
 | `seed` | Training or evaluation seed. |
@@ -156,6 +156,19 @@ Most checkpoints use:
 ```text
 <bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>
 ```
+
+At evaluation, every adapter resolves the checkpoint directory with the same
+precedence (highest first):
+
+1. an explicit checkpoint path in `deploy.yml`
+   (`model_path` / `checkpoint_path` / `ckpt_path` / `model_dir` / `pretrained_path`);
+2. `ckpt_name` given as a **path** — absolute, or a relative path containing `/`
+   (relative paths resolve against the policy directory);
+3. the **default** concatenated run-dir name
+   `<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>` under `checkpoints/`
+   (this is what `train.sh` writes, so passing the short `ckpt_name` used at
+   training time just works);
+4. `checkpoints/<ckpt_name>` verbatim (so passing the full run-dir name also works).
 
 Some policies intentionally differ. Follow the policy README when it disagrees with this table.
 

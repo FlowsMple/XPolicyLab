@@ -27,9 +27,27 @@ policy_name="$(basename "${SCRIPT_DIR}")"
 yaml_file="${XPL_ROOT}/policy/${policy_name}/deploy.yml"
 
 action_dim=$(bash "${UTILS_DIR}/get_action_dim.sh" "${BENCH_ROOT}" "${env_cfg_type}")
-# ckpt_name is the full run directory name under results/Checkpoints/ or checkpoints/.
+# Run-dir resolution: the default run dir is the 5-tuple
+# <bench>-<ckpt>-<env>-<action>-<seed> under results/Checkpoints/ or checkpoints/.
+# ckpt_name may also be a path (absolute, or relative containing '/', resolved
+# under this policy dir), and checkpoints/<ckpt_name> is kept as a verbatim
+# fallback. STARVLA_CKPT_PATH stays the highest-priority explicit override.
+run_id="${bench_name}-${ckpt_name}-${env_cfg_type}-${action_type}-${seed}"
 result_run_dir="${SCRIPT_DIR}/results/Checkpoints/${ckpt_name}"
 local_run_dir="${SCRIPT_DIR}/checkpoints/${ckpt_name}"
+
+if [[ "${ckpt_name}" == /* ]]; then
+    candidate_run_dirs=("${ckpt_name}")
+elif [[ "${ckpt_name}" == */* ]]; then
+    candidate_run_dirs=("${SCRIPT_DIR}/${ckpt_name}")
+else
+    candidate_run_dirs=(
+        "${SCRIPT_DIR}/results/Checkpoints/${run_id}"
+        "${SCRIPT_DIR}/checkpoints/${run_id}"
+        "${result_run_dir}"
+        "${local_run_dir}"
+    )
+fi
 
 resolve_starvla_checkpoint() {
     local run_dir=$1
@@ -57,13 +75,15 @@ resolve_starvla_checkpoint() {
 }
 
 checkpoint_path="${STARVLA_CKPT_PATH:-}"
-if [[ -n "${checkpoint_path}" ]]; then
-    :
-elif checkpoint_path=$(resolve_starvla_checkpoint "${result_run_dir}"); then
-    :
-elif checkpoint_path=$(resolve_starvla_checkpoint "${local_run_dir}"); then
-    :
-else
+if [[ -z "${checkpoint_path}" ]]; then
+    for run_dir in "${candidate_run_dirs[@]}"; do
+        if checkpoint_path=$(resolve_starvla_checkpoint "${run_dir}"); then
+            break
+        fi
+        checkpoint_path=""
+    done
+fi
+if [[ -z "${checkpoint_path}" ]]; then
     checkpoint_path="${local_run_dir}/checkpoints/<checkpoint>.pt"
 fi
 if [[ ! -f "${checkpoint_path}" ]]; then

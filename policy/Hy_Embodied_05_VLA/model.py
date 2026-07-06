@@ -269,14 +269,28 @@ class Model(ModelTemplate):
         ckpt_name = (model_cfg.get("ckpt_name") or "").strip()
         _ckpt_placeholders = {"", "null", "none", "default", "ckpt", "ckpt_name", "-"}
         if ckpt_name.lower() not in _ckpt_placeholders and not os.path.isdir(ckpt_path):
-            for cand in (
-                _resolve_path(ckpt_name, _POLICY_DIR),
-                _resolve_path(Path("checkpoints") / ckpt_name, hy_root),
-                _resolve_path(Path("Hy-VLA-RoboDojo-v3") / ckpt_name, hy_root),
-                _resolve_path(Path("checkpoints") / ckpt_name, _POLICY_DIR),
-            ):
+            # Shared precedence for the ckpt_name fallback: ckpt_name-as-path >
+            # 5-tuple concat under checkpoints/ > checkpoints/<ckpt_name>
+            # verbatim (from the helper), followed by the Hy-specific hy_root
+            # layouts. The hy_root-relative ckpt_path above stays the explicit
+            # override, so those candidates are only tried when it is missing.
+            from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
+
+            candidates = candidate_checkpoint_roots(
+                model_cfg,
+                _POLICY_DIR / "checkpoints",
+                policy_dir=_POLICY_DIR,
+                explicit_keys=(),
+            )
+            candidates += [
+                Path(_resolve_path(ckpt_name, _POLICY_DIR)),
+                Path(_resolve_path(Path("checkpoints") / ckpt_name, hy_root)),
+                Path(_resolve_path(Path("Hy-VLA-RoboDojo-v3") / ckpt_name, hy_root)),
+                Path(_resolve_path(Path("checkpoints") / ckpt_name, _POLICY_DIR)),
+            ]
+            for cand in candidates:
                 if os.path.isdir(cand):
-                    ckpt_path = cand
+                    ckpt_path = str(cand)
                     break
 
         norm_cfg = model_cfg.get("norm_path") or os.environ.get("HY_VLA_NORM_PATH")

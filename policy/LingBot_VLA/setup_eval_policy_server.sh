@@ -20,8 +20,25 @@ ln -sfn "${XPL_ROOT}" "${IMPORT_SHIM_DIR}/XPolicyLab"
 
 policy_name="$(basename "${SCRIPT_DIR}")"
 yaml_file="${XPL_ROOT}/policy/${policy_name}/deploy.yml"
-# ckpt_name is the full run directory name under checkpoints/.
-checkpoint_root="${SCRIPT_DIR}/checkpoints/${ckpt_name}"
+
+# Shared checkpoint-root precedence (POLICY_DIR = policy dir,
+# CKPT_ROOT = its checkpoints dir):
+#   1. ckpt_name as an absolute path
+#   2. ckpt_name as a relative path (POLICY_DIR-relative)
+#   3. 5-tuple concat run-dir under checkpoints/
+#   4. checkpoints/<ckpt_name> verbatim (backward compatible)
+POLICY_DIR="${SCRIPT_DIR}"
+CKPT_ROOT="${SCRIPT_DIR}/checkpoints"
+run_dir_name="${bench_name}-${ckpt_name}-${env_cfg_type}-${action_type}-${seed}"
+if [[ "${ckpt_name}" == /* ]]; then
+    checkpoint_root="${ckpt_name}"
+elif [[ "${ckpt_name}" == */* ]]; then
+    checkpoint_root="${POLICY_DIR}/${ckpt_name}"
+elif [[ -d "${CKPT_ROOT}/${run_dir_name}" ]]; then
+    checkpoint_root="${CKPT_ROOT}/${run_dir_name}"
+else
+    checkpoint_root="${CKPT_ROOT}/${ckpt_name}"
+fi
 qwen25_path="${QWEN25_PATH:?Set QWEN25_PATH to the Qwen2.5-VL-3B-Instruct weights directory}"
 
 checkpoint_path=$(python - <<PY

@@ -26,6 +26,11 @@ for _path in (str(_XPL_ROOT), str(_CUR_DIR), str(_INNER_ROOT), str(_SRC_ROOT)):
         sys.path.insert(0, _path)
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import (
+    build_run_dir_name,
+    candidate_checkpoint_roots,
+    ckpt_name_is_path,
+)
 from XPolicyLab.utils.load_file import load_json, load_yaml
 from XPolicyLab.utils.process_data import pack_robot_state, unpack_robot_state
 
@@ -199,21 +204,15 @@ class Model(ModelTemplate):
 
     def _resolve_checkpoint_path(self) -> Path:
         preferred_file = str(self.model_cfg.get("checkpoint_file") or "model_ema.pt")
-        explicit = self.model_cfg.get("checkpoint_path") or self.model_cfg.get("model_path")
-        explicit_path = _as_path(explicit) if explicit else None
-        if explicit_path is not None:
-            chosen = _choose_checkpoint_file(explicit_path, preferred_file)
-            if chosen is None:
-                raise FileNotFoundError(f"Could not resolve checkpoint file from {explicit_path}")
-            return chosen
-
-        ckpt_name = self.model_cfg.get("ckpt_name")
-        roots: list[Path] = []
-        if ckpt_name:
-            roots.append(_CHECKPOINTS_DIR / str(ckpt_name))
-
         checkpoint_num = self.model_cfg.get("checkpoint_num") or "latest"
-        for root in roots:
+
+        candidates = candidate_checkpoint_roots(
+            self.model_cfg,
+            _CHECKPOINTS_DIR,
+            policy_dir=_CUR_DIR,
+            explicit_keys=("checkpoint_path", "model_path"),
+        )
+        for root in candidates:
             if not root.exists():
                 continue
             if str(checkpoint_num).lower() not in {"", "none", "latest"}:
@@ -228,11 +227,12 @@ class Model(ModelTemplate):
             chosen = _choose_checkpoint_file(root, preferred_file)
             if chosen is not None:
                 return chosen
-            ckpt_dirs = [p for p in root.iterdir() if p.is_dir() and p.name.startswith("checkpoint-")]
-            for ckpt_dir in sorted(ckpt_dirs, key=_checkpoint_step, reverse=True):
-                chosen = _choose_checkpoint_file(ckpt_dir, preferred_file)
-                if chosen is not None:
-                    return chosen
+            if root.is_dir():
+                ckpt_dirs = [p for p in root.iterdir() if p.is_dir() and p.name.startswith("checkpoint-")]
+                for ckpt_dir in sorted(ckpt_dirs, key=_checkpoint_step, reverse=True):
+                    chosen = _choose_checkpoint_file(ckpt_dir, preferred_file)
+                    if chosen is not None:
+                        return chosen
 
         raise FileNotFoundError(
             "Could not resolve GigaWorldPolicy checkpoint. Set checkpoint_path/model_path, "
@@ -251,12 +251,20 @@ class Model(ModelTemplate):
         )
         stats_path = _as_path(self.model_cfg.get("stats_path") or os.environ.get("GIGAWORLD_NORM_PATH"))
         if stats_path is None:
+            # data-setting folder is named by the run-dir name; fall back to a
+            # non-path ckpt_name for backward compatibility.
+            data_settings: list[str] = []
+            run_dir_name = build_run_dir_name(self.model_cfg)
+            if run_dir_name:
+                data_settings.append(run_dir_name)
             ckpt_name = self.model_cfg.get("ckpt_name")
-            if ckpt_name:
-                data_setting = str(ckpt_name)
+            if ckpt_name and not ckpt_name_is_path(ckpt_name):
+                data_settings.append(str(ckpt_name))
+            for data_setting in data_settings:
                 candidate = _CUR_DIR / "data" / data_setting / "norm_stats_delta.json"
                 if candidate.is_file():
                     stats_path = candidate.resolve()
+                    break
         if model_id is None or stats_path is None:
             raise ValueError("base_model_path/model_id and stats_path are required when load_model=true.")
 

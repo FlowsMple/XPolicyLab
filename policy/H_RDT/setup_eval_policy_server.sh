@@ -60,8 +60,27 @@ resolve_checkpoint_path() {
 }
 
 action_dim=$(bash "${UTILS_DIR}/get_action_dim.sh" "${BENCH_ROOT}" "${env_cfg_type}")
-# ckpt_name is the full run directory name under checkpoints/.
-checkpoint_dir="${SCRIPT_DIR}/checkpoints/${ckpt_name}"
+
+# Shared checkpoint-dir precedence (POLICY_DIR = policy dir,
+# CKPT_ROOT = its checkpoints dir):
+#   1. ckpt_name as an absolute path
+#   2. ckpt_name as a relative path (POLICY_DIR-relative)
+#   3. 5-tuple concat run-dir under checkpoints/
+#   4. checkpoints/<ckpt_name> verbatim (backward compatible)
+# The positional checkpoint_path override still wins inside
+# resolve_checkpoint_path() below.
+POLICY_DIR="${SCRIPT_DIR}"
+CKPT_ROOT="${SCRIPT_DIR}/checkpoints"
+run_dir_name="${bench_name}-${ckpt_name}-${env_cfg_type}-${action_type}-${seed}"
+if [[ "${ckpt_name}" == /* ]]; then
+    checkpoint_dir="${ckpt_name}"
+elif [[ "${ckpt_name}" == */* ]]; then
+    checkpoint_dir="${POLICY_DIR}/${ckpt_name}"
+elif [[ -d "${CKPT_ROOT}/${run_dir_name}" ]]; then
+    checkpoint_dir="${CKPT_ROOT}/${run_dir_name}"
+else
+    checkpoint_dir="${CKPT_ROOT}/${ckpt_name}"
+fi
 checkpoint_path="$(resolve_checkpoint_path "${checkpoint_path}" "${checkpoint_dir}")"
 # Prefer the config copied into the checkpoint dir by train.sh; fall back to data/;
 # pass config_path explicitly if neither matches.

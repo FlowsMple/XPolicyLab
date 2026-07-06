@@ -22,6 +22,7 @@ for _path in (str(_REPO_ROOT), str(_CUR_DIR), str(_RDT_ROOT), str(_RDT_ROOT / "m
         sys.path.insert(0, _path)
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import resolve_checkpoint_root
 from XPolicyLab.utils.process_data import decode_image_bit, get_robot_action_dim_info, unpack_robot_state
 
 from .rdt.scripts.robodojo_model import create_model
@@ -169,46 +170,51 @@ class Model(ModelTemplate):
         }
 
     def _resolve_checkpoint_root(self) -> Path | None:
-        ckpt_name = self.model_cfg.get("ckpt_name")
-        if ckpt_name:
-            checkpoint_root = (_CHECKPOINTS_DIR / str(ckpt_name)).expanduser().resolve()
-            if not checkpoint_root.is_dir():
-                return checkpoint_root
+        # Shared precedence: explicit path keys > ckpt_name-as-path > 5-tuple
+        # concat under checkpoints/ > checkpoints/<ckpt_name> verbatim. The
+        # within-root step-dir discovery below is preserved.
+        explicit_keys = ("checkpoint_path", "model_path", "model_root")
+        if not self.model_cfg.get("ckpt_name") and not any(self.model_cfg.get(key) for key in explicit_keys):
+            return None
 
-            candidate_dirs = []
-            if any((checkpoint_root / marker).exists() for marker in ("config.json", "pytorch_model.bin", "pytorch_model")):
-                candidate_dirs.append(checkpoint_root)
-            candidate_dirs.extend(
-                child
-                for child in sorted(checkpoint_root.iterdir())
-                if child.is_dir() and any((child / marker).exists() for marker in ("config.json", "pytorch_model.bin", "pytorch_model"))
-            )
-            if not candidate_dirs:
-                return checkpoint_root
+        checkpoint_root = resolve_checkpoint_root(
+            self.model_cfg,
+            _CHECKPOINTS_DIR,
+            policy_dir=_CUR_DIR,
+            explicit_keys=explicit_keys,
+            must_exist=False,
+        )
+        if not checkpoint_root.is_dir():
+            return checkpoint_root
 
-            checkpoint_num = self.model_cfg.get("checkpoint_num")
-            desired_step = _extract_step_number(checkpoint_num)
-            if desired_step is not None:
-                for candidate in candidate_dirs:
-                    candidate_step = _extract_step_number(candidate.name)
-                    if candidate_step is None:
-                        continue
-                    scaled_step = desired_step
-                    while len(str(scaled_step)) < len(str(candidate_step)):
-                        scaled_step *= 10
-                    if candidate_step in {desired_step, scaled_step}:
-                        return candidate
+        candidate_dirs = []
+        if any((checkpoint_root / marker).exists() for marker in ("config.json", "pytorch_model.bin", "pytorch_model")):
+            candidate_dirs.append(checkpoint_root)
+        candidate_dirs.extend(
+            child
+            for child in sorted(checkpoint_root.iterdir())
+            if child.is_dir() and any((child / marker).exists() for marker in ("config.json", "pytorch_model.bin", "pytorch_model"))
+        )
+        if not candidate_dirs:
+            return checkpoint_root
 
-            numeric_dirs = [candidate for candidate in candidate_dirs if _extract_step_number(candidate.name) is not None]
-            if numeric_dirs:
-                return max(numeric_dirs, key=lambda candidate: _extract_step_number(candidate.name) or -1)
-            return candidate_dirs[0]
+        checkpoint_num = self.model_cfg.get("checkpoint_num")
+        desired_step = _extract_step_number(checkpoint_num)
+        if desired_step is not None:
+            for candidate in candidate_dirs:
+                candidate_step = _extract_step_number(candidate.name)
+                if candidate_step is None:
+                    continue
+                scaled_step = desired_step
+                while len(str(scaled_step)) < len(str(candidate_step)):
+                    scaled_step *= 10
+                if candidate_step in {desired_step, scaled_step}:
+                    return candidate
 
-        for key in ("checkpoint_path", "model_path", "model_root"):
-            resolved = _resolve_path(self.model_cfg.get(key))
-            if resolved is not None:
-                return resolved
-        return None
+        numeric_dirs = [candidate for candidate in candidate_dirs if _extract_step_number(candidate.name) is not None]
+        if numeric_dirs:
+            return max(numeric_dirs, key=lambda candidate: _extract_step_number(candidate.name) or -1)
+        return candidate_dirs[0]
 
     def _resolve_indexed_path(self, base_dir: Path | None, explicit_value: str | None, candidate_relpaths: list[str]) -> str | None:
         explicit_path = _resolve_path(explicit_value)

@@ -26,8 +26,27 @@ yaml_file="${POLICY_DIR}/deploy.yml"
 # simulator task forwarded to the env client; ckpt_name is the full run
 # directory name under checkpoints/, so the same checkpoint can be evaluated
 # across tasks.
+# Shared checkpoint-dir precedence (POLICY_DIR = policy dir,
+# CKPT_ROOT = its checkpoints dir):
+#   1. FASTWAM_CKPT_SETTING explicit override (CKPT_ROOT/<setting>)
+#   2. ckpt_name as an absolute path
+#   3. ckpt_name as a relative path (POLICY_DIR-relative)
+#   4. 5-tuple concat run-dir under checkpoints/
+#   5. checkpoints/<ckpt_name> verbatim (backward compatible)
+CKPT_ROOT="${FASTWAM_CKPT_ROOT:-${POLICY_DIR}/checkpoints}"
 ckpt_setting="${FASTWAM_CKPT_SETTING:-${ckpt_name}}"
-ckpt_dir="${FASTWAM_CKPT_ROOT:-${POLICY_DIR}/checkpoints}/${ckpt_setting}"
+run_dir_name="${bench_name}-${ckpt_name}-${env_cfg_type}-${action_type}-${seed}"
+if [[ -n "${FASTWAM_CKPT_SETTING:-}" ]]; then
+    ckpt_dir="${CKPT_ROOT}/${ckpt_setting}"
+elif [[ "${ckpt_name}" == /* ]]; then
+    ckpt_dir="${ckpt_name}"
+elif [[ "${ckpt_name}" == */* ]]; then
+    ckpt_dir="${POLICY_DIR}/${ckpt_name}"
+elif [[ -d "${CKPT_ROOT}/${run_dir_name}" ]]; then
+    ckpt_dir="${CKPT_ROOT}/${run_dir_name}"
+else
+    ckpt_dir="${CKPT_ROOT}/${ckpt_setting}"
+fi
 weights_dir="${ckpt_dir}/checkpoints/weights"
 dataset_stats_path="${FASTWAM_DATASET_STATS_PATH:-${ckpt_dir}/dataset_stats.json}"
 

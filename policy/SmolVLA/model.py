@@ -20,6 +20,7 @@ for _path in (str(_REPO_ROOT), str(_LEROBOT_SRC), str(_LEROBOT_ROOT)):
         sys.path.insert(0, _path)
 
 from XPolicyLab.model_template import ModelTemplate
+from XPolicyLab.utils.checkpoint_resolver import candidate_checkpoint_roots
 from XPolicyLab.utils.process_data import (
     decode_image_bit,
     get_robot_action_dim_info,
@@ -115,29 +116,6 @@ def _extract_step_number(value: Any) -> int | None:
     return int(digits) if digits else None
 
 
-def _resolve_checkpoint_root(model_cfg: dict[str, Any]) -> Path | None:
-    ckpt_name = model_cfg.get("ckpt_name")
-    if ckpt_name:
-        ckpt_path = Path(str(ckpt_name)).expanduser()
-        candidates = []
-        if ckpt_path.is_absolute():
-            candidates.append(ckpt_path)
-        else:
-            candidates.extend((_CHECKPOINTS_DIR / ckpt_path, _CUR_DIR / ckpt_path))
-
-        for candidate in candidates:
-            resolved = candidate.resolve()
-            if resolved.exists():
-                return resolved
-        return candidates[0].resolve()
-
-    for key in ("pretrained_path", "model_path", "checkpoint_path"):
-        value = model_cfg.get(key)
-        if value:
-            return Path(value).expanduser().resolve()
-    return None
-
-
 def _has_lerobot_artifact(path: Path) -> bool:
     return (
         (path / "model.safetensors").is_file()
@@ -184,7 +162,7 @@ class Model(ModelTemplate):
         self.robot_action_dim_info = get_robot_action_dim_info(env_cfg) if env_cfg is not None else None
         self.default_prompt = self.model_cfg.get("prompt") or self.task_name
         self.device = self._get_device(self.model_cfg.get("device", "cuda"))
-        self.pretrained_path = self._resolve_pretrained_path(_resolve_checkpoint_root(self.model_cfg))
+        self.pretrained_path = self._resolve_pretrained_path_from_candidates()
         self.policy = self._load_policy()
         self.actions_per_chunk = self._resolve_actions_per_chunk()
         self.preprocessor, self.postprocessor = self._build_processors()
@@ -218,10 +196,25 @@ class Model(ModelTemplate):
             return resolved
         raise ValueError("Failed to resolve actions_per_chunk from model config or policy config.")
 
-    def _resolve_pretrained_path(self, checkpoint_root: Path | None):
-        if checkpoint_root is None:
+    def _resolve_pretrained_path_from_candidates(self) -> str:
+        candidates = candidate_checkpoint_roots(
+            self.model_cfg,
+            _CHECKPOINTS_DIR,
+            policy_dir=_CUR_DIR,
+            explicit_keys=("pretrained_path", "model_path", "checkpoint_path"),
+        )
+        if not candidates:
             raise ValueError("ckpt_name, pretrained_path, or model_path is required for SmolVLA.")
+        last_error: FileNotFoundError | None = None
+        for checkpoint_root in candidates:
+            try:
+                return self._resolve_pretrained_path(checkpoint_root)
+            except FileNotFoundError as error:
+                last_error = error
+        assert last_error is not None
+        raise last_error
 
+    def _resolve_pretrained_path(self, checkpoint_root: Path):
         artifact_root = checkpoint_root
         if checkpoint_root.is_dir():
             candidate_dirs: list[Path] = []
