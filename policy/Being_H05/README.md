@@ -35,8 +35,7 @@ Parameters used by the command:
 
 ```bash
 cd XPolicyLab/policy/Being_H05
-# Example: this adapter has no top-level install wrapper.
-# Install the vendored upstream project, then keep this directory on PYTHONPATH.
+bash install.sh
 ```
 
 ## Demo Data Processing

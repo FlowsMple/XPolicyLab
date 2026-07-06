@@ -46,6 +46,34 @@ What it does: prepares RoboDojo demonstration data for policy training. The outp
 
 This adapter has no top-level `process_data.sh`. It expects data in the format consumed by the upstream project or by `deploy.yml`/environment variables. Use the upstream README under the vendored source tree when custom conversion is required.
 
+## Model Assets
+
+What it does: prepares the Wan/DiffSynth model cache and the ActionDiT backbone required before the first training run. See the upstream [AHA-WAM README](https://github.com/serene-sivy/AHA-WAM#model-assets--checkpoints).
+
+Parameters used by the command:
+
+| Parameter | Description |
+|---|---|
+| `policy_env` | Conda environment for the AHA_WAM runtime. |
+| `DIFFSYNTH_MODEL_BASE_PATH` | Root directory for Wan2.2-TI2V-5B and redirected DiffSynth T5/VAE files. |
+| `AHA_WAM_ACTION_DIT_PATH` | Optional ActionDiT backbone override; defaults to `AHAWAM/checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt`. |
+
+```bash
+cd XPolicyLab/policy/AHA_WAM
+conda activate <policy_env>
+export DIFFSYNTH_MODEL_BASE_PATH=/path/to/diffsynth/model/cache
+
+cd AHAWAM
+mkdir -p checkpoints
+python scripts/preprocess_action_dit_backbone.py \
+  --model-config configs/model/ahawam.yaml \
+  --output checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt \
+  --device cuda \
+  --dtype bfloat16
+```
+
+If preprocessing fails because `configs/model/ahawam.yaml` contains unresolved Hydra placeholders when loaded outside Hydra, rerun with `configs/model/ahawam_preprocess.yaml` and the same `--output` path. Set `AHA_WAM_ACTION_DIT_PATH` when the backbone file is stored outside the default location.
+
 ## Model Training
 
 What it does: starts the policy-specific training recipe through the XPolicyLab wrapper and writes checkpoints under this adapter directory.
@@ -193,6 +221,7 @@ Frequently used environment variables detected in the adapter scripts:
 |---|---|
 | `AHA_WAM_TRAIN_DATASET_DIR` | Required for training; points to the prepared RoboDojo LeRobot v2.1 video dataset. |
 | `DIFFSYNTH_MODEL_BASE_PATH` | Required for training and normally required for model loading; points to the Wan/DiffSynth model cache. |
+| `AHA_WAM_ACTION_DIT_PATH` | Optional ActionDiT backbone override; defaults to `AHAWAM/checkpoints/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt`. |
 | `AHA_WAM_TRAIN_DATASET_STATS_PATH` | Optional training stats override; defaults to `$AHA_WAM_TRAIN_DATASET_DIR/dataset_stats.json`. |
 | `AHA_WAM_TEXT_EMBED_CACHE_DIR` | Optional text embedding cache override; defaults to `$AHA_WAM_TRAIN_DATASET_DIR/text_embeds_cache`. |
 | `AHA_WAM_OUTPUT_ROOT` | Optional training checkpoint root; defaults to `policy/AHA_WAM/checkpoints`. |
