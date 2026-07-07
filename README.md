@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="XPolicyLab" width="480"/>
+<img src="assets/logo.png" alt="XPolicyLab"/>
 
 <p><strong>XPolicyLab: A unified standard and infrastructure for robot policy development and deployment.</strong></p>
 
