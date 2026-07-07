@@ -158,7 +158,7 @@ Clone XPolicyLab as a normal Python project when you are developing adapters, ru
 ```bash
 mkdir demo_env
 cd demo_env
-git clone git@github.com:Luminis-Platform/XPolicyLab.git
+git clone https://github.com/XPolicyLab/XPolicyLab.git
 cd XPolicyLab
 pip install -e .
 ```
