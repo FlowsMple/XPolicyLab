@@ -65,6 +65,22 @@ bash process_data.sh <bench_name> <ckpt_name> <env_cfg_type> <action_type>
 bash process_data.sh RoboDojo stack_bowls arx_x5 joint
 ```
 
+## Data Mix Configuration
+
+What it does: selects which LeRobot dataset subdirectories are loaded during training. `train.sh` passes `data_mix` to the upstream loader, which resolves each registered subdirectory as `<data_root_dir>/<dataset_subdirectory>/`.
+
+Parameters used by this step:
+
+| Parameter | Description |
+|---|---|
+| `data_mix` | Mix name passed as the first argument to `train.sh`; must match a key in `source_eventvla/eventvla/dataloader/gr00t_lerobot/mixtures.py`. |
+| `data_root_dir` | Parent directory that contains every dataset subdirectory listed for the chosen mix. Optional positional argument to `train.sh`; overridden by `EVENTVLA_DATA_ROOT`. |
+| `EVENTVLA_DATA_ROOT` | Environment override for `data_root_dir` in both `process_data.sh` and `train.sh`. |
+
+Available mixes and their dataset subdirectories are defined in `source_eventvla/eventvla/dataloader/gr00t_lerobot/mixtures.py`. After `process_data.sh`, set `EVENTVLA_DATA_ROOT` to the parent of the subdirectory named there for your chosen mix.
+
+To register a new mix, add an entry to `DATASET_NAMED_MIXTURES` in `mixtures.py`, place the corresponding LeRobot directories under `<data_root_dir>`, then pass the new mix name to `train.sh`.
+
 ## Model Training
 
 What it does: starts the EventVLA upstream training recipe and writes results under `results/Checkpoints/<RUN_ID>/`. The printed `RUN_ID` is the value to pass as eval `ckpt_name`.
@@ -73,7 +89,7 @@ Parameters used by the command:
 
 | Parameter | Description |
 |---|---|
-| `data_mix` | Upstream EventVLA data mix name, for example `robodojo`. |
+| `data_mix` | Upstream EventVLA data mix name; must match a key in `mixtures.py`. |
 | `memory_ablation_mode` | Memory ablation/profile name, for example `pure_image_keyframe_memory`. |
 | `keyframe_memory_policy` | Keyframe memory policy. Supported values are `teacher` and `predict` aliases. |
 | `data_root_dir` | Optional first extra argument, used as the training data root unless `EVENTVLA_DATA_ROOT` is set. |

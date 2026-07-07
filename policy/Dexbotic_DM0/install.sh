@@ -20,16 +20,25 @@ if command -v conda >/dev/null 2>&1; then
   conda activate "${CONDA_ENV}"
   pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
     --index-url https://download.pytorch.org/whl/cu128
-  pip install 'deepspeed>=0.18.0' 'numpydantic>=1.6'
+  pip install 'deepspeed>=0.18.0'
 fi
 
 cd "${DEXBOTIC_ROOT}"
 pip install -e .
+pip install 'numpydantic>=1.6,<2'
 pip install opencv-python-headless tqdm
 
 cd "${XPOLICYLAB_ROOT}"
 pip install -e .
 pip install h5py pyyaml
+
+editable_root="$(python -c "import dexbotic.exp.dm0_exp as m; print(m.__file__.split('/dexbotic/')[0])")"
+if [[ "${editable_root}/dexbotic" != "${DEXBOTIC_ROOT}" ]]; then
+  echo "[Dexbotic_DM0] WARN: dexbotic editable points to ${editable_root}/dexbotic, expected ${DEXBOTIC_ROOT}" >&2
+  echo "[Dexbotic_DM0] Reinstalling editable dexbotic from this adapter..." >&2
+  pip install -e "${DEXBOTIC_ROOT}" --force-reinstall --no-deps
+  pip install 'numpydantic>=1.6,<2'
+fi
 
 python -c "import dexbotic; print('dexbotic ok')"
 python -c "import XPolicyLab; print('XPolicyLab ok')"
