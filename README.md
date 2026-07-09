@@ -22,8 +22,8 @@ Start here for repo-level concepts and integration steps. For install commands, 
 
 **Benchmarks**
 
-- **RoboDojo**: supported for RoboDojo simulator-backed evaluation and RoboDojo-format data exports.
-- **RoboTwin**: supported as a benchmark and data source through policy-specific adapters and conversion scripts.
+- **[RoboDojo](https://github.com/RoboDojo-Benchmark/RoboDojo)**: supported for RoboDojo simulator-backed evaluation and RoboDojo-format data exports.
+- **[RoboTwin](https://github.com/RoboTwin-Platform/RoboTwin)**: supported as a benchmark and data source through policy-specific adapters and conversion scripts.
 
 **Infrastructure**
 
@@ -163,11 +163,15 @@ cd XPolicyLab
 pip install -e .
 ```
 
-You do not need a simulator installation to start model-side development. Download a small HuggingFace demo bundle and keep the data next to `XPolicyLab/`:
+You do not need a simulator installation to start model-side development. The downloader in this standalone XPolicyLab repo fetches prepared RoboDojo data for XPolicyLab-only training and offline debugging, without requiring a RoboDojo simulator checkout. It provides multiple RoboDojo data versions, plus HDF5 `RoboDojo_real` data for real-world experiments.
+
+If you are using the `XPolicyLab/` subpackage inside the RoboDojo repository, follow RoboDojo's own data download scripts instead of this standalone helper.
+
+Download a small Hugging Face demo bundle and keep the data next to `XPolicyLab/`:
 
 ```bash
 # From demo_env/XPolicyLab
-bash scripts/RoboDojo/download_robodojo_data.sh huggingface demo
+bash scripts/RoboDojo/download_robodojo_data.sh demo
 ```
 
 This creates:
@@ -181,9 +185,17 @@ demo_env/
 You can also pull HDF5 or LeRobot exports for RoboDojo and other benchmark-backed experiments:
 
 ```bash
-bash scripts/RoboDojo/download_robodojo_data.sh huggingface hdf5
-bash scripts/RoboDojo/download_robodojo_data.sh huggingface lerobot_v3.0
-bash scripts/RoboDojo/download_robodojo_data.sh huggingface lerobot_v2.1
+# RoboDojo HDF5 data, saved to ../data/RoboDojo
+bash scripts/RoboDojo/download_robodojo_data.sh hdf5
+
+# RoboDojo LeRobot v3.0 video data, saved to ../data/RoboDojo_lerobot_v30_video
+bash scripts/RoboDojo/download_robodojo_data.sh lerobot_v3.0
+
+# RoboDojo LeRobot v2.1 video data, saved to ../data/RoboDojo_lerobot_v21_video
+bash scripts/RoboDojo/download_robodojo_data.sh lerobot_v2.1
+
+# RoboDojo real-world HDF5 data, saved to ../data/RoboDojo_real
+bash scripts/RoboDojo/download_robodojo_data.sh real
 ```
 
 With this setup, you can test data conversion, model loading, training scripts, and debug-mode evaluation before connecting to a simulator-backed benchmark.
@@ -191,6 +203,7 @@ With this setup, you can test data conversion, model loading, training scripts, 
 ```bash
 export EVAL_ENV_TYPE=debug
 cd policy/demo_policy
+pip install -e .
 bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 0 0 base base
 ```
 
@@ -385,6 +398,8 @@ from XPolicyLab.utils.process_data import decode_image_bit, get_robot_action_dim
 ```
 
 `decode_image_bit` handles encoded RGB image streams. `get_robot_action_dim_info(env_cfg_type)` returns robot-specific `arm_dim` and `ee_dim` lists, so adapters do not need to hard-code action dimensions.
+
+Robot action dimensions are registered in `utils/robot/_robot_info.json`. Each top-level key is an `env_cfg_type` such as `arx_x5`, and its `arm_dim` / `ee_dim` lists describe the per-arm joint dimensions and end-effector or gripper dimensions. Update this file when adding a new robot configuration so data conversion, training, and deployment code can infer action shapes consistently.
 
 ## 💾 Data And Checkpoints
 
