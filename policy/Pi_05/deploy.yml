@@ -4,7 +4,7 @@ protocol: ws
 host: localhost
 bench_name: null
 task_name: null
-env_cfg_type: null
+env_cfg_type: tianji_marvin
 seed: null
 eval_batch: true
 
@@ -13,10 +13,10 @@ result_dir: "./results/pi05/"
 obs_transform_pipeline: "xspark-v1.0"
 
 # Model / action configuration
-action_type: joint
+action_type: ee
 policy_uv_env_path: openpi
 # Must match the config used by train.sh (default OPENPI_TRAIN_CONFIG_NAME).
-train_config_name: pi05_base_aloha_full_sim_arx-x5_seed_0
-repo_id: arx_x5_sim
+train_config_name: pi05_real_tianji_marvin_ee
+repo_id: RoboDojo_real-pick_magnet-tianji_marvin-ee
 
 port: 6000

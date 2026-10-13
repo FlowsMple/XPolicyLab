@@ -244,6 +244,88 @@ class AbsoluteActions(DataTransformFn):
         return data
 
 
+# Per-arm layout of a bimanual EE action: xyz (3) + quaternion wxyz (4) + gripper (1).
+EE_ARM_DIM = 8
+
+
+def _quat_normalize(q: np.ndarray) -> np.ndarray:
+    q = q / np.maximum(np.linalg.norm(q, axis=-1, keepdims=True), 1e-8)
+    # q and -q describe the same rotation; pin them to the w >= 0 hemisphere.
+    return np.where(q[..., :1] < 0, -q, q)
+
+
+def _quat_conjugate(q: np.ndarray) -> np.ndarray:
+    return np.concatenate([q[..., :1], -q[..., 1:]], axis=-1)
+
+
+def _quat_multiply(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    aw, ax, ay, az = np.split(a, 4, axis=-1)
+    bw, bx, by, bz = np.split(b, 4, axis=-1)
+    return np.concatenate(
+        [
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ],
+        axis=-1,
+    )
+
+
+def _offset_ee_actions(state: np.ndarray, actions: np.ndarray, num_arms: int, *, inverse: bool) -> np.ndarray:
+    dims = num_arms * EE_ARM_DIM
+    state = np.asarray(state)
+    actions = np.array(actions, copy=True)
+    if state.shape[-1] < dims or actions.shape[-1] < dims:
+        raise ValueError(f"Need at least {dims} EE dims, got state {state.shape} and actions {actions.shape}")
+
+    # Broadcast the current state across the action horizon.
+    state = np.expand_dims(state, axis=-2)
+
+    for arm in range(num_arms):
+        base = arm * EE_ARM_DIM
+        pos = slice(base, base + 3)
+        rot = slice(base + 3, base + 7)
+        state_quat = _quat_normalize(state[..., rot])
+        if inverse:
+            actions[..., pos] += state[..., pos]
+            actions[..., rot] = _quat_normalize(_quat_multiply(actions[..., rot], state_quat))
+        else:
+            actions[..., pos] -= state[..., pos]
+            actions[..., rot] = _quat_normalize(_quat_multiply(actions[..., rot], _quat_conjugate(state_quat)))
+    return actions
+
+
+@dataclasses.dataclass(frozen=True)
+class DeltaEEActions(DataTransformFn):
+    """Repacks absolute bimanual EE actions into delta EE space.
+
+    Positions become offsets from the current state and rotations become the base-frame
+    relative rotation `q_action * q_state^-1`. Grippers stay absolute.
+    """
+
+    num_arms: int = 2
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if "actions" not in data:
+            return data
+        data["actions"] = _offset_ee_actions(data["state"], data["actions"], self.num_arms, inverse=False)
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
+class AbsoluteEEActions(DataTransformFn):
+    """Repacks delta EE actions back into absolute poses. Inverse of `DeltaEEActions`."""
+
+    num_arms: int = 2
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if "actions" not in data:
+            return data
+        data["actions"] = _offset_ee_actions(data["state"], data["actions"], self.num_arms, inverse=True)
+        return data
+
+
 @dataclasses.dataclass(frozen=True)
 class TokenizePrompt(DataTransformFn):
     tokenizer: _tokenizer.PaligemmaTokenizer

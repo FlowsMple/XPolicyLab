@@ -239,6 +239,10 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
     # If true, will convert joint dimensions to deltas with respect to the current state before passing to the model.
     # Gripper dimensions will remain in absolute values.
     use_delta_joint_actions: bool = True
+    # If true, will convert EE pose dimensions (xyz + quat wxyz per arm) to deltas with respect to the current
+    # state. Gripper dimensions will remain in absolute values. Requires `action_output_dim` and is mutually
+    # exclusive with `use_delta_joint_actions`.
+    use_delta_ee_actions: bool = False
     # If provided, will be injected into the input data if the "prompt" key is not present.
     default_prompt: str | None = None
     # If true, this will convert the joint and gripper values from the standard Aloha space to
@@ -262,18 +266,42 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
     )
     # Action keys that will be used to read the action sequence from the dataset.
     action_sequence_keys: Sequence[str] = ("action",)
+    # If set, slice model actions to this dim (e.g. 16 for dual-arm xyz+quat+gripper)
+    # instead of AlohaOutputs' hard-coded 14-D joint slice.
+    action_output_dim: int | None = None
+    # If set, only these Aloha cameras are treated as valid during training/inference.
+    # Disabled slots are filled with black images and image_mask=False.
+    enabled_cameras: tuple[str, ...] | None = None
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        if self.action_output_dim is not None:
+            output_transform = aloha_policy.BimanualEEOutputs(action_dim=self.action_output_dim)
+        else:
+            output_transform = aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi)
         data_transforms = _transforms.Group(
-            inputs=[aloha_policy.AlohaInputs(adapt_to_pi=self.adapt_to_pi)],
-            outputs=[aloha_policy.AlohaOutputs(adapt_to_pi=self.adapt_to_pi)],
+            inputs=[aloha_policy.AlohaInputs(adapt_to_pi=self.adapt_to_pi, enabled_cameras=self.enabled_cameras)],
+            outputs=[output_transform],
         )
+        if self.use_delta_joint_actions and self.use_delta_ee_actions:
+            raise ValueError("use_delta_joint_actions and use_delta_ee_actions are mutually exclusive")
         if self.use_delta_joint_actions:
             delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
             data_transforms = data_transforms.push(
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+        elif self.use_delta_ee_actions:
+            if self.action_output_dim is None:
+                raise ValueError("use_delta_ee_actions requires action_output_dim")
+            num_arms, remainder = divmod(self.action_output_dim, _transforms.EE_ARM_DIM)
+            if remainder != 0:
+                raise ValueError(
+                    f"action_output_dim={self.action_output_dim} is not a multiple of {_transforms.EE_ARM_DIM}"
+                )
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaEEActions(num_arms=num_arms)],
+                outputs=[_transforms.AbsoluteEEActions(num_arms=num_arms)],
             )
 
         model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
@@ -767,6 +795,444 @@ _CONFIGS = [
             decay_steps=30_000,
             decay_lr=5e-6,
         ),
+    ),
+    # Real dual Tianji Marvin EE: 16D absolute xyz+quat+gripper. ee_dim stays gripper=1.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet-tianji_marvin-ee",
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            action_output_dim=16,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=144,
+        fsdp_devices=2,
+        num_train_steps=60_000,
+    ),
+    # Same data as pi05_real_tianji_marvin_ee, but trained on delta EE actions.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee_delta",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet-tianji_marvin-ee",
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=True,
+            action_output_dim=16,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=144,
+        fsdp_devices=2,
+        # Matches the default CosineDecaySchedule decay_steps.
+        num_train_steps=30_000,
+    ),
+    # 9012 + 9017 + 9018 + 0919 merged (1512 eps). Same delta EE as pi05_real_tianji_marvin_ee_delta.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee_delta_all",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet_all-tianji_marvin-ee",
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=True,
+            action_output_dim=16,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=144,
+        fsdp_devices=2,
+        num_train_steps=30_000,
+    ),
+    # All current shards: 9012+9017+9018+0919+9019 (2003 eps). Same delta EE.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee_delta_full",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet_full-tianji_marvin-ee",
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=True,
+            action_output_dim=16,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=144,
+        fsdp_devices=2,
+        num_train_steps=30_000,
+    ),
+    # Absolute 16D joint (7+1 per arm) on the 2003-ep full merge.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_joint",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet_full-tianji_marvin-joint",
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=False,
+            action_output_dim=16,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=144,
+        fsdp_devices=2,
+        num_train_steps=30_000,
+    ),
+    # full + 0922/0923 (3003 eps). Same delta EE as pi05_real_tianji_marvin_ee_delta_full.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee_delta_full2",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee",
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=True,
+            action_output_dim=16,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=144,
+        fsdp_devices=2,
+        num_train_steps=30_000,
+    ),
+    # Same data and delta EE as full2, but train only on the left wrist camera.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee_delta_full2_left_wrist",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee",
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=True,
+            action_output_dim=16,
+            enabled_cameras=("cam_left_wrist",),
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=144,
+        fsdp_devices=2,
+        num_train_steps=30_000,
+    ),
+    # Left-wrist-only training on the full2 stride-2 dataset. Reuses full2 delta EE norm stats.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee_delta_full2_left_wrist_stride2",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee-stride2",
+            assets=AssetsConfig(
+                assets_dir="/vepfs-cnbje63de6fae220/zijian/XPolicyLab/policy/Pi_05/openpi/assets/pi05_real_tianji_marvin_ee_delta_full2",
+                asset_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee",
+            ),
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=True,
+            action_output_dim=16,
+            enabled_cameras=("cam_left_wrist",),
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=128,
+        fsdp_devices=2,
+        num_train_steps=30_000,
+    ),
+    # 15fps downsample of full2 (3003 eps). Delta EE; save every 10k steps.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee_delta_full2_fps15",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee-fps15",
+            assets=AssetsConfig(
+                assets_dir="/vepfs-cnbje63de6fae220/zijian/XPolicyLab/policy/Pi_05/openpi/assets/pi05_real_tianji_marvin_ee_delta_full2",
+                asset_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee",
+            ),
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=True,
+            action_output_dim=16,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=128,
+        fsdp_devices=2,
+        num_train_steps=20_000,
+        save_interval=10_000,
+        keep_period=10_000,
+    ),
+    # full2 stride-2 keep 30fps (half duration). Reuses 30fps full2 norm stats.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee_delta_full2_stride2",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee-stride2",
+            assets=AssetsConfig(
+                assets_dir="/vepfs-cnbje63de6fae220/zijian/XPolicyLab/policy/Pi_05/openpi/assets/pi05_real_tianji_marvin_ee_delta_full2",
+                asset_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee",
+            ),
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=True,
+            action_output_dim=16,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=128,
+        fsdp_devices=2,
+        num_train_steps=20_000,
+        save_interval=10_000,
+        keep_period=10_000,
+    ),
+    # full2 stride-3 keep 30fps (1/3 duration). Reuses 30fps full2 norm stats.
+    TrainConfig(
+        name="pi05_real_tianji_marvin_ee_delta_full2_stride3",
+        model=pi0_config.Pi0Config(pi05=True, action_dim=32),
+        data=LeRobotAlohaDataConfig(
+            repo_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee-stride3",
+            assets=AssetsConfig(
+                assets_dir="/vepfs-cnbje63de6fae220/zijian/XPolicyLab/policy/Pi_05/openpi/assets/pi05_real_tianji_marvin_ee_delta_full2",
+                asset_id="RoboDojo_real-pick_magnet_full2-tianji_marvin-ee",
+            ),
+            adapt_to_pi=False,
+            use_delta_joint_actions=False,
+            use_delta_ee_actions=True,
+            action_output_dim=16,
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "images": {
+                                "cam_high": "observation.images.cam_high",
+                                "cam_left_wrist": "observation.images.cam_left_wrist",
+                                "cam_right_wrist": "observation.images.cam_right_wrist",
+                            },
+                            "state": "observation.state",
+                            "actions": "action",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            base_config=DataConfig(
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/vepfs-cnbje63de6fae220/xspark_shared/model_weights/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        seed=0,
+        batch_size=128,
+        fsdp_devices=2,
+        num_train_steps=20_000,
+        save_interval=10_000,
+        keep_period=10_000,
     ),
 ]
 

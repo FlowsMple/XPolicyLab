@@ -40,6 +40,38 @@ def test_delta_actions_noop():
     assert transform(item) is item
 
 
+def test_delta_ee_actions_roundtrip():
+    rng = np.random.default_rng(0)
+
+    def random_poses(shape):
+        pose = rng.normal(size=(*shape, 8)).astype(np.float32)
+        quat = pose[..., 3:7]
+        quat /= np.linalg.norm(quat, axis=-1, keepdims=True)
+        quat[quat[..., 0] < 0] *= -1.0
+        return pose
+
+    state = np.concatenate([random_poses(()), random_poses(())], axis=-1)
+    actions = np.concatenate([random_poses((5,)), random_poses((5,))], axis=-1)
+
+    delta = _transforms.DeltaEEActions()({"state": state, "actions": actions.copy()})["actions"]
+    # Grippers stay absolute, positions become offsets.
+    for base in (0, 8):
+        np.testing.assert_allclose(delta[..., base + 7], actions[..., base + 7])
+        np.testing.assert_allclose(delta[..., base : base + 3], actions[..., base : base + 3] - state[base : base + 3])
+
+    restored = _transforms.AbsoluteEEActions()({"state": state, "actions": delta})["actions"]
+    np.testing.assert_allclose(restored, actions, atol=1e-5)
+
+
+def test_delta_ee_actions_identity_state():
+    # An identity state must leave the actions untouched.
+    state = np.array([0, 0, 0, 1, 0, 0, 0, 0.3] * 2, dtype=np.float32)
+    actions = np.tile(np.array([0.1, 0.2, 0.3, 1, 0, 0, 0, 0.7] * 2, dtype=np.float32), (3, 1))
+
+    delta = _transforms.DeltaEEActions()({"state": state, "actions": actions.copy()})["actions"]
+    np.testing.assert_allclose(delta, actions, atol=1e-6)
+
+
 def test_absolute_actions():
     item = {"state": np.array([1, 2, 3]), "actions": np.array([[3, 4, 5], [5, 6, 7]])}
 

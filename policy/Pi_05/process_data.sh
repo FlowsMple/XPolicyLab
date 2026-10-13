@@ -16,13 +16,16 @@ py_args=(
   "${ckpt_name}"
   "${env_cfg_type}"
   "${action_type}"
-  --mode "${mode}"
 )
 if [[ -n "${expert_data_num_or_raw_task_dirs}" ]]; then
   py_args+=("${expert_data_num_or_raw_task_dirs}")
 fi
 if [[ -n "${raw_task_dirs}" ]]; then
   py_args+=("${raw_task_dirs}")
+fi
+py_args+=(--mode "${mode}")
+if [[ -n "${OPENPI_INSTRUCTION:-}" ]]; then
+  py_args+=(--instruction "${OPENPI_INSTRUCTION}")
 fi
 
 cd "${POLICY_DIR}/openpi"

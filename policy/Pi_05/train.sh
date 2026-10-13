@@ -38,13 +38,22 @@ echo "[Pi_05] lerobot_repo_id=${lerobot_repo_id}"
 echo "[Pi_05] fsdp_devices=${fsdp_devices}"
 echo "[Pi_05] local_cache_root=${LOCAL_CACHE_ROOT}"
 echo "[Pi_05] checkpoint_dir=${ckpt_dir}"
+if [[ -n "${OPENPI_BATCH_SIZE:-}" ]]; then
+  echo "[Pi_05] batch_size=${OPENPI_BATCH_SIZE}"
+fi
 
 cd "${POLICY_DIR}/openpi/"
+train_args=(
+  scripts/train.py "${train_config_name}"
+  --exp-name="${ckpt_setting}"
+  --data.repo-id="${lerobot_repo_id}"
+  --fsdp-devices="${fsdp_devices}"
+  --checkpoint-dir-override="${ckpt_dir}"
+  --seed="${seed}"
+  --overwrite
+)
+if [[ -n "${OPENPI_BATCH_SIZE:-}" ]]; then
+  train_args+=(--batch-size="${OPENPI_BATCH_SIZE}")
+fi
 XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.9}" \
-  uv run scripts/train.py "${train_config_name}" \
-    --exp-name="${ckpt_setting}" \
-    --data.repo-id="${lerobot_repo_id}" \
-    --fsdp-devices="${fsdp_devices}" \
-    --checkpoint-dir-override="${ckpt_dir}" \
-    --seed="${seed}" \
-    --overwrite
+  uv run "${train_args[@]}"

@@ -11,10 +11,10 @@ import random
 from tqdm import tqdm
 
 from XPolicyLab.utils.load_file import load_yaml, load_json
-from XPolicyLab.utils.process_data import decode_image_bit
+from XPolicyLab.utils.process_data import decode_image_bit, pack_robot_state
 
-from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import HF_LEROBOT_HOME
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 ROOT_PATH = Path(__file__).parent.parent.parent.parent.parent
 
@@ -89,39 +89,96 @@ def create_empty_dataset(
     )
 
 def _load_compressed_images(group: h5py.Group, key: str) -> np.ndarray:
-    return np.asarray(decode_image_bit(group[key]))
+    return np.asarray(decode_image_bit(group[key][()]))
 
-def _make_action_from_state(state: np.ndarray) -> np.ndarray:
-    action = np.empty_like(state, dtype=np.float32)
-    if len(state) == 1:
-        action[0] = state[0]
-        return action
 
-    action[:-1] = state[1:]
-    action[-1] = state[-1]
-    return action
+def _as_2d_float(array) -> np.ndarray:
+    arr = np.asarray(array)
+    if arr.ndim == 1:
+        arr = arr[:, None]
+    return arr
 
-def load_data(ep_path) -> dict[str, Any]:
+
+def _group_to_arrays(group: h5py.Group) -> dict[str, np.ndarray]:
+    return {key: _as_2d_float(group[key][()]) for key in group.keys()}
+
+
+def _pose_dim_from_group(group: dict[str, np.ndarray], default: int = 7) -> int:
+    for key in ("left_ee_poses", "right_ee_poses", "ee_poses"):
+        if key in group:
+            return int(np.asarray(group[key]).shape[-1])
+    return default
+
+
+def _pack_dim_info(action_type: str, robot_action_dim_info: dict, sample_group: dict | None = None) -> dict:
+    """Keep ee_dim (gripper). For EE, pack pose using the recorded pose width, not joint DoF."""
+    if action_type != "ee":
+        return robot_action_dim_info
+    pose_dim = _pose_dim_from_group(sample_group or {}, default=7)
+    return {
+        "arm_dim": [pose_dim] * len(robot_action_dim_info["arm_dim"]),
+        "ee_dim": list(robot_action_dim_info["ee_dim"]),
+    }
+
+
+def _decode_instruction_value(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, bytes):
+        return [value.decode("utf-8", errors="replace")]
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, np.ndarray):
+        if value.shape == ():
+            return _decode_instruction_value(value.item())
+        result = []
+        for item in value.tolist():
+            result.extend(_decode_instruction_value(item))
+        return [item for item in result if item]
+    return [str(value)]
+
+
+def _read_instructions(ep: h5py.File) -> list[str] | None:
+    if "instructions" in ep:
+        strings = _decode_instruction_value(ep["instructions"][()])
+        return strings or None
+    if "instruction" in ep:
+        strings = _decode_instruction_value(ep["instruction"][()])
+        return strings or None
+    return None
+
+
+def _read_frequency(ep: h5py.File, default: int = 30) -> int:
+    if "additional_info" in ep and "frequency" in ep["additional_info"]:
+        return int(np.asarray(ep["additional_info"]["frequency"][()]).item())
+    return default
+
+
+def load_data(ep_path, action_type: str, robot_action_dim_info: dict) -> dict[str, Any]:
     with h5py.File(ep_path, "r") as ep:
-        right_state = np.concatenate(
-            [ep["state/right_arm_joint_states"][:], ep["state/right_ee_joint_states"][:][:, None]],
-            axis=1,
-        )
-        left_state = np.concatenate(
-            [ep["state/left_arm_joint_states"][:], ep["state/left_ee_joint_states"][:][:, None]],
-            axis=1,
-        )
-        state = np.concatenate([left_state, right_state], axis=1).astype(np.float32)
-        action = _make_action_from_state(state)
+        if "state" not in ep:
+            raise KeyError(f"{ep_path} is missing a 'state' group")
+        if "action" not in ep:
+            raise KeyError(f"{ep_path} is missing an 'action' group")
+
+        packed = {
+            "state": _group_to_arrays(ep["state"]),
+            "action": _group_to_arrays(ep["action"]),
+        }
+        pack_info = _pack_dim_info(action_type, robot_action_dim_info, packed["state"])
+        state = pack_robot_state(
+            packed, action_type, pack_info, source_type="dataset", state_type="state"
+        ).astype(np.float32)
+        action = pack_robot_state(
+            packed, action_type, pack_info, source_type="dataset", state_type="action"
+        ).astype(np.float32)
 
         images = {}
         for source_name, output_name in CAMERA_ALIASES.items():
             if source_name in ep["vision"]:
                 images[output_name] = _load_compressed_images(ep["vision"][source_name], "colors")
-        try:
-            instructions = ep["instructions"]
-        except KeyError:
-            instructions = None
+        instructions = _read_instructions(ep)
+        frequency = _read_frequency(ep)
 
     return {
         "images": images,
@@ -131,6 +188,7 @@ def load_data(ep_path) -> dict[str, Any]:
         "effort": None,
         "timestamps": None,
         "instructions": instructions,
+        "frequency": frequency,
     }
 
 def main():
@@ -163,8 +221,8 @@ def main():
     parser.add_argument(
         "--instruction",
         type=str,
-        default="Do your job.",
-        help="Default instruction when not present in HDF5",
+        default=None,
+        help="If set, use this prompt for every episode (overrides HDF5 instruction).",
     )
     args = parser.parse_args()
 
@@ -189,16 +247,7 @@ def main():
     env_cfg = load_yaml(os.path.join(ROOT_PATH, "./env_cfg", f"{env_cfg_type}.yml"))
     robot_type = env_cfg['config']['robot']
 
-    robot_action_dim_info = robot_action_dim_info = load_json(os.path.join(ROOT_PATH, "env_cfg/robot", "_robot_info.json"))[robot_type]
-
-    dataset = create_empty_dataset(
-        repo_id=repo_id,
-        robot_type=robot_type,
-        fps=50, # pi default to 50
-        mode=mode,
-        dataset_config=DEFAULT_DATASET_CONFIG,
-        robot_action_dim_info=robot_action_dim_info,
-    )
+    robot_action_dim_info = load_json(os.path.join(ROOT_PATH, "env_cfg/robot", "_robot_info.json"))[robot_type]
 
     episode_files = []
     for raw_task_dir in raw_task_dirs:
@@ -209,16 +258,42 @@ def main():
         episode_files.extend(task_episode_files)
     if expert_data_num is not None:
         episode_files = episode_files[:expert_data_num]
+    if not episode_files:
+        raise FileNotFoundError(
+            f"No episode_*.hdf5 files found under data/{bench_name}/<task>/{env_cfg_type}"
+        )
+
+    fps = 30
+    with h5py.File(episode_files[0], "r") as first_ep:
+        fps = _read_frequency(first_ep, default=30)
+        sample_state = _group_to_arrays(first_ep["state"]) if "state" in first_ep else {}
+    pack_info = _pack_dim_info(action_type, robot_action_dim_info, sample_state)
+
+    dataset = create_empty_dataset(
+        repo_id=repo_id,
+        robot_type=robot_type,
+        fps=fps,
+        mode=mode,
+        dataset_config=DEFAULT_DATASET_CONFIG,
+        robot_action_dim_info=pack_info,
+    )
+
     for ep_file in tqdm(episode_files, desc="Processing episodes", unit="episode"):
         try:
-            data = load_data(ep_file)
+            data = load_data(ep_file, action_type, robot_action_dim_info)
             num_frames = data["state"].shape[0]
+            if instruction:
+                episode_instruction = instruction
+            elif data["instructions"]:
+                episode_instruction = random.choice(data["instructions"])
+            else:
+                episode_instruction = "Do your job."
 
             for i in range(num_frames):
                 frame = {
                     "observation.state": data["state"][i],
                     "action": data["action"][i],
-                    "task": instruction if data["instructions"] is None else random.choice(data["instructions"]),
+                    "task": episode_instruction,
                 }
                 for camera_name, images in data["images"].items():
                     frame[f"observation.images.{camera_name}"] = images[i]

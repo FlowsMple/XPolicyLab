@@ -44,6 +44,16 @@ class AlohaInputs(transforms.DataTransformFn):
     # The expected cameras names. All input cameras must be in this set. Missing cameras will be
     # replaced with black images and the corresponding `image_mask` will be set to False.
     EXPECTED_CAMERAS: ClassVar[tuple[str, ...]] = ("cam_high", "cam_low", "cam_left_wrist", "cam_right_wrist")
+    # If set, only these cameras are treated as valid. Disabled slots get a black image and
+    # `image_mask=False`. None keeps the default three-camera layout (cam_high required).
+    enabled_cameras: tuple[str, ...] | None = None
+
+    def _camera_enabled(self, name: str, in_images: dict) -> bool:
+        if name not in in_images:
+            return False
+        if self.enabled_cameras is None:
+            return True
+        return name in self.enabled_cameras
 
     def __call__(self, data: dict) -> dict:
         data = _decode_aloha(data, adapt_to_pi=self.adapt_to_pi)
@@ -51,29 +61,32 @@ class AlohaInputs(transforms.DataTransformFn):
         in_images = data["images"]
         if set(in_images) - set(self.EXPECTED_CAMERAS):
             raise ValueError(f"Expected images to contain {self.EXPECTED_CAMERAS}, got {tuple(in_images)}")
+        if self.enabled_cameras is not None and set(self.enabled_cameras) - set(self.EXPECTED_CAMERAS):
+            raise ValueError(f"enabled_cameras must be a subset of {self.EXPECTED_CAMERAS}, got {self.enabled_cameras}")
 
-        # Assume that base image always exists.
-        base_image = in_images["cam_high"]
+        if self.enabled_cameras is None:
+            # Default layout: the head camera is required and always treated as valid.
+            ref_image = in_images["cam_high"]
+        else:
+            present_enabled = [name for name in self.enabled_cameras if name in in_images]
+            if not present_enabled:
+                raise ValueError(f"No enabled camera images found. enabled_cameras={self.enabled_cameras}")
+            ref_image = in_images[present_enabled[0]]
 
-        images = {
-            "base_0_rgb": base_image,
-        }
-        image_masks = {
-            "base_0_rgb": _make_image_mask(base_image, True),
-        }
-
-        # Add the extra images.
-        extra_image_names = {
+        slot_sources = {
+            "base_0_rgb": "cam_high",
             "left_wrist_0_rgb": "cam_left_wrist",
             "right_wrist_0_rgb": "cam_right_wrist",
         }
-        for dest, source in extra_image_names.items():
-            if source in in_images:
+        images = {}
+        image_masks = {}
+        for dest, source in slot_sources.items():
+            if self._camera_enabled(source, in_images):
                 images[dest] = in_images[source]
                 image_masks[dest] = _make_image_mask(in_images[source], True)
             else:
-                images[dest] = np.zeros_like(base_image)
-                image_masks[dest] = _make_image_mask(base_image, False)
+                images[dest] = np.zeros_like(ref_image)
+                image_masks[dest] = _make_image_mask(ref_image, False)
 
         inputs = {
             "image": images,
@@ -105,6 +118,16 @@ class AlohaOutputs(transforms.DataTransformFn):
         # Only return the first 14 dims.
         actions = np.asarray(data["actions"])[..., :14]
         return {"actions": _encode_actions(actions, adapt_to_pi=self.adapt_to_pi)}
+
+
+@dataclasses.dataclass(frozen=True)
+class BimanualEEOutputs(transforms.DataTransformFn):
+    """Slice padded model actions back to bimanual EE dim (7+1+7+1=16 xyz+quat+gripper)."""
+
+    action_dim: int = 16
+
+    def __call__(self, data: dict) -> dict:
+        return {"actions": np.asarray(data["actions"])[..., : self.action_dim]}
 
 
 def _joint_flip_mask() -> np.ndarray:

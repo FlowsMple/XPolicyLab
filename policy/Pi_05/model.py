@@ -93,6 +93,12 @@ class Model(ModelTemplate):
         self.robot_action_dim_info = (
             get_robot_action_dim_info(model_cfg["env_cfg_type"]) if model_cfg.get("env_cfg_type") is not None else None
         )
+        # EE pose is xyz+quat (7), independent of the arm's joint DoF. Do not change ee_dim.
+        if self.action_type == "ee" and self.robot_action_dim_info is not None:
+            self.robot_action_dim_info = {
+                "arm_dim": [7] * len(self.robot_action_dim_info["arm_dim"]),
+                "ee_dim": list(self.robot_action_dim_info["ee_dim"]),
+            }
         self.observation_window: dict[str, Any] | None = None
         self._latest_env_idx_list: list[int] = [0]
 
