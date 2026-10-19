@@ -14,6 +14,13 @@ bash install.sh
 source openpi/.venv/bin/activate  # OpenPI is uv-managed; there is no policy conda env
 ```
 
+`bash install.sh` does not install the RLinf runtime. After the eval install, activate `openpi/.venv` and run the runtime script yourself. It keeps torch 2.10 and jax 0.5.3.
+
+```bash
+source openpi/.venv/bin/activate
+bash ../../infra/RLinf/install_rl_runtime.sh
+```
+
 `eval.sh` arg 9 is not a conda env: pass `uv` (uses `deploy.yml` `policy_uv_env_path`) or an explicit OpenPI project path.
 
 ## Data Processing

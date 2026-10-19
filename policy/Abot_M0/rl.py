@@ -119,18 +119,24 @@ class AbotRLPolicy(nn.Module):
     @property
     def _no_split_modules(self) -> list[str]:
         qwen_modules = getattr(self.base_model.qwen_vl_interface.model, "_no_split_modules", None) or []
-        return [*qwen_modules, "BasicTransformerBlock", "DiT", "ValueHead"]
+        modules = [*qwen_modules, "BasicTransformerBlock", "DiT"]
+        # FSDP looks up every name and fails if the class is absent. GRPO has no value head.
+        if self.rl_config.add_value_head:
+            modules.append("ValueHead")
+        return modules
 
     @property
     def _no_split_names(self) -> list[str]:
-        return [
+        names = [
             "qwen_vl_interface",
             "action_encoder",
             "action_decoder",
             "position_embedding",
             "state_encoder",
-            "value_head",
         ]
+        if self.rl_config.add_value_head:
+            names.append("value_head")
+        return names
 
     @torch.no_grad()
     def encode(self, batch_images, instructions) -> tuple[torch.Tensor, torch.Tensor]:

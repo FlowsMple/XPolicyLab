@@ -16,6 +16,13 @@ bash install.sh
 conda activate <policy_env>  # e.g. demo-policy
 ```
 
+`bash install.sh` does not install the RLinf runtime. After the eval install, activate that env and run the runtime script yourself.
+
+```bash
+conda activate <policy_env>
+bash ../../infra/RLinf/install_rl_runtime.sh
+```
+
 ## Data Processing
 
 Stub — prints the standard output naming convention without converting data. The optional trailing argument is an episode-limit placeholder:
@@ -62,7 +69,7 @@ To train with PPO or GRPO:
 1. Implement `_sample_policy` and `_log_prob_value` in `rl.py`. `sample_actions_rl` and `get_log_prob_value` already return the shapes RLinf expects. Log-probs have to come from the policy sample.
 2. Assign the trainable `nn.Module` to `self.model` or `self.policy` in `Model.__init__`.
 3. Add `"ppo"` and/or `"grpo"` to `Model.RL_MODES`.
-4. Set `actor.model.xpolicylab.required_mode` to that mode. Launch steps are in [RL training on RoboTwin](../../README.md#rl-training-on-robotwin).
+4. Set `actor.model.xpolicylab.required_mode` to that mode. Install the runtime with `bash ../../infra/RLinf/install_rl_runtime.sh`, then follow [RL training on RoboTwin](../../README.md#rl-training-on-robotwin).
 
 `predict_action_batch_rl` returns actions `[B, H, D]` in `pack_robot_state` order, plus `prev_logprobs`, `prev_values` (`[B, 1]`), and `forward_inputs`. `compute_logprob_value` returns `logprobs` (same shape as `prev_logprobs`), `values` (`[B]`), and `entropy` (`[B, 1]`).
 

@@ -14,7 +14,7 @@ conda activate ABot
 bash install.sh
 ```
 
-`install.sh` uses `ABOT_CONDA_ENV` when set and installs XPolicyLab plus `h5py`, `opencv-python`, and `pyyaml`.
+`install.sh` uses `ABOT_CONDA_ENV` when set and installs XPolicyLab plus `h5py`, `opencv-python`, and `pyyaml`. It does not install the RLinf runtime. After `install.sh`, activate that env and run `bash ../../infra/RLinf/install_rl_runtime.sh --upgrade-torch` to add Ray, Hydra, and the editable RLinf checkout, and to upgrade torch to 2.11 there. Clone the env first and set `ABOT_CONDA_ENV` if you need to keep the original eval stack.
 
 ## 2. Manual XPolicyLab Integration
 

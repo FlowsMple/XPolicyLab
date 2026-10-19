@@ -16,6 +16,13 @@ bash install.sh
 conda activate <policy_env>  # e.g. ABot (install.sh env name; override with ABOT_CONDA_ENV)
 ```
 
+`bash install.sh` does not install the RLinf runtime. After the eval install, activate that env and run the runtime script yourself. `--upgrade-torch` upgrades torch to 2.11 in that env; clone the env first and set `ABOT_CONDA_ENV` if you need to keep the original eval stack.
+
+```bash
+conda activate <policy_env>
+bash ../../infra/RLinf/install_rl_runtime.sh --upgrade-torch
+```
+
 ## Data Processing
 
 No top-level `process_data.sh`. Training consumes a **LeRobot v2.1** dataset resolved via `ABOT_DATA_ROOT` / `ABOT_DATASET_REPO` / `ABOT_DATA_MIX` (see Configuration), defaulting to `RoboDojo_sim_v21_video_abot`.

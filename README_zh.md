@@ -529,12 +529,17 @@ python scripts/transform_lerobot_v21_format.py "<bench_name>.*.*" \
 
 ```bash
 git submodule update --init --recursive
+cd policy/<POLICY>
+bash install.sh
+# 激活该策略环境
+bash ../../infra/RLinf/install_rl_runtime.sh
+cd ../..
 export ROBOTWIN_ASSETS_PATH=/path/to/robotwin_assets
 export POLICY_MODEL_PATH=/path/to/policy_checkpoint
 bash XPolicyLab/infra/RLinf/run.sh robotwin_adjust_bottle_grpo_xpolicylab_pi05
 ```
 
-`adjust_bottle` 配置覆盖 Pi_05 GRPO 与 Abot_M0 PPO，以及对应的 eval 配置。这些配置开启 eval 视频。训练视频保持关闭。启动前设置 `ROBOTWIN_ASSETS_PATH` 和 `POLICY_MODEL_PATH`。日志与 checkpoint 写到 `infra/RLinf/results`（按 `RLINF_PATH` 解析，不在 RoboTwin 检出根目录）。
+`bash install.sh` 不安装 RLinf 运行时。评测环境装好后，激活该策略环境，再单独跑 `bash infra/RLinf/install_rl_runtime.sh`（Abot 的 RL 还要加 `--upgrade-torch`）。`adjust_bottle` 配置覆盖 Pi_05 GRPO 与 Abot_M0 PPO，以及对应的 eval 配置。这些配置开启 eval 视频。训练视频保持关闭。启动前设置 `ROBOTWIN_ASSETS_PATH` 和 `POLICY_MODEL_PATH`。日志与 checkpoint 写到 `infra/RLinf/results`（按 `RLINF_PATH` 解析，不在 RoboTwin 检出根目录）。
 
 adapter 填空样例是 [policy/demo_policy](policy/demo_policy/README.md#rl-training)。在 `rl.py` 里实现 `_sample_policy` 和 `_log_prob_value`，把可训练的 `nn.Module` 放到 `self.model` 或 `self.policy`，log-prob 真实可用后再把 `"ppo"` 或 `"grpo"` 加进 `RL_MODES`。`required_mode: eval` 仍使用 `get_action_batch`。
 

@@ -529,12 +529,17 @@ The paste-in checklist for agents that load none of these is in [CONTRIBUTING.md
 
 ```bash
 git submodule update --init --recursive
+cd policy/<POLICY>
+bash install.sh
+# activate the policy env from that install
+bash ../../infra/RLinf/install_rl_runtime.sh
+cd ../..
 export ROBOTWIN_ASSETS_PATH=/path/to/robotwin_assets
 export POLICY_MODEL_PATH=/path/to/policy_checkpoint
 bash XPolicyLab/infra/RLinf/run.sh robotwin_adjust_bottle_grpo_xpolicylab_pi05
 ```
 
-`adjust_bottle` configs cover Pi_05 GRPO and Abot_M0 PPO, plus matching eval configs. Eval video is enabled in those configs. Training video stays off. Set `ROBOTWIN_ASSETS_PATH` and `POLICY_MODEL_PATH` before launch. Logs and checkpoints go under `infra/RLinf/results` (resolved from `RLINF_PATH`, not the RoboTwin checkout root).
+`bash install.sh` does not install the RLinf runtime. After that eval install, activate the policy env and run `bash infra/RLinf/install_rl_runtime.sh` (Abot RL also needs `--upgrade-torch`). `adjust_bottle` configs cover Pi_05 GRPO and Abot_M0 PPO, plus matching eval configs. Eval video is enabled in those configs. Training video stays off. Set `ROBOTWIN_ASSETS_PATH` and `POLICY_MODEL_PATH` before launch. Logs and checkpoints go under `infra/RLinf/results` (resolved from `RLINF_PATH`, not the RoboTwin checkout root).
 
 The adapter fill-in is [policy/demo_policy](policy/demo_policy/README.md#rl-training). Implement `_sample_policy` and `_log_prob_value` in `rl.py`, put the trainable `nn.Module` on `self.model` or `self.policy`, and add `"ppo"` or `"grpo"` to `RL_MODES` once those log-probs are real. `required_mode: eval` keeps using `get_action_batch`.
 

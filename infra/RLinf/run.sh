@@ -3,6 +3,10 @@
 # Required environment variables when the selected config needs them:
 #   ROBOTWIN_ASSETS_PATH  RoboTwin embodiment assets
 #   POLICY_MODEL_PATH     Pi_05 or Abot_M0 checkpoint
+# Optional:
+#   ROBOTWIN_SIM_PYTHON   Python of a separate RoboTwin sim venv. When set, each env
+#                         worker runs the simulator in a child process of that venv,
+#                         so the policy venv needs no sapien/curobo.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
