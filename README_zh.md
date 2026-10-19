@@ -14,6 +14,9 @@
 <a href="https://robotwin-platform.github.io/leaderboard">RoboTwin Leaderboard</a>
 </p>
 
+<p>🏆 <strong>最佳工具论文奖</strong> · IROS 2026, Pittsburgh<br/>
+Building Scalable Infrastructure for Robot Learning Workshop，授予全体 XPolicyLab 贡献者。</p>
+
 <img src="assets/teaser.png" alt="XPolicyLab overview" width="100%"/>
 
 <p><em>把 N 个策略接到 M 个评测环境 —— 从 O(N×M) 降到 O(N+M)。</em></p>
@@ -22,7 +25,7 @@
 
 
 
-XPolicyLab 是策略代码与评测环境之间的共享层。每个模型的依赖、权重与训练配方放在 `policy/<POLICY>/`；XPolicyLab 负责那些枯燥但容易出错的部分 —— 服务化、观测/动作契约，以及评测接线。截至 2026 年 9 月，生态已接入 **44 个机器人策略**，覆盖 VLA、world-action、模仿学习与记忆增强等家族；同一套 adapter 可服务 RoboTwin、RoboDojo 仿真，以及标准化真机评测。
+XPolicyLab 是策略代码与评测环境之间的共享层。每个模型的依赖、权重与训练配方放在 `policy/<POLICY>/`；XPolicyLab 负责那些枯燥但容易出错的部分 —— 服务化、观测/动作契约，以及评测接线。截至 2026 年 10 月，生态已接入 **68 个机器人策略**，覆盖 VLA、world-action、模仿学习与记忆增强等家族；同一套 adapter 可服务 RoboTwin、RoboDojo 仿真，以及标准化真机评测。
 
 仓库级概念与接入步骤从本文开始。安装命令、权重布局与训练细节以各策略自己的 README 为准。
 
@@ -75,13 +78,13 @@ XPolicyLab 与具体 benchmark 解耦：任意 benchmark、仿真器或真机方
 **基础设施**
 
 - **[RLinf](https://github.com/RLinf/RLinf)** *（即将支持）*：策略开发与部署工作流的基础设施目标。
-- **StarVLA**：基础设施与策略栈；见 [policy/starVLA](policy/starVLA/README.md)。
+- **StarVLA**：基础设施与策略栈；见 [policy/StarVLA](policy/StarVLA/README.md)。
 
 
 
 ## 🧭 已接入策略
 
-当前已接入 44 个策略，覆盖 VLA、world-action、模仿学习与记忆增强等家族，另加 [demo_policy](policy/demo_policy/README.md) 作为最小参考 adapter。顶层 adapter 位于 `policy/`；每个策略 README 记录该模型的论文/仓库链接、环境、数据格式、训练入口与 checkpoint 布局。
+当前已接入 68 个策略，覆盖 VLA、world-action、模仿学习与记忆增强等家族，另加 [demo_policy](policy/demo_policy/README.md) 作为最小参考 adapter。顶层 adapter 位于 `policy/`；每个策略 README 记录该模型的论文/仓库链接、环境、数据格式、训练入口与 checkpoint 布局。
 
 
 | Policy                                   | Policy                                               | Policy                                      | Policy                                                     | Policy                                                         | Policy                                            |
@@ -90,10 +93,15 @@ XPolicyLab 与具体 benchmark 解耦：任意 benchmark、仿真器或真机方
 | [DreamZero](policy/DreamZero/README.md)  | [EventVLA](policy/EventVLA/README.md)                | [FastWAM](policy/FastWAM/README.md)         | [G0](policy/GalaxeaVLA/README.md)                          | [G0.5](policy/G05/README.md)                                   | [GO-1](policy/GO1/README.md)                      |
 | [GR00T-N1.7](policy/GR00T_N17/README.md) | [GigaWorld-Policy](policy/GigaWorldPolicy/README.md) | [H-RDT](policy/H_RDT/README.md)             | [Hy-Embodied-0.5-VLA](policy/Hy_Embodied_05_VLA/README.md) | [InternVLA-A1](policy/InternVLA_A1/README.md)                  | [InternVLA-A1.5](policy/InternVLA_A1_5/README.md) |
 | [LDA-1B](policy/LDA_1B/README.md)        | [LingBot-VA](policy/LingBot_VA/README.md)            | [LingBot-VLA](policy/LingBot_VLA/README.md) | [Meituan-Robotics-0](policy/Meituan_Robotics_0/README.md)  | [Mem-0](policy/Mem_0/README.md)                                | [MolmoAct2](policy/MolmoAct2/README.md)           |
-| [OLA-SEM](policy/OLA_SEM/README.md)      | [OpenDM](policy/OpenDM/README.md)                    | [OpenVLA-OFT](policy/OpenVLA_OFT/README.md) | [OpenWAM](policy/OpenWAM/README.md)                        | [π0](policy/Pi_0/README.md)                                    | [π0.5](policy/Pi_05/README.md)                    |
+| [UniWAM](policy/UniWAM/README.md)      | [OpenDM](policy/OpenDM/README.md)                    | [OpenVLA-OFT](policy/OpenVLA_OFT/README.md) | [OpenWAM](policy/OpenWAM/README.md)                        | [π0](policy/Pi_0/README.md)                                    | [π0.5](policy/Pi_05/README.md)                    |
 | [π0-Fast](policy/Pi_0_Fast/README.md)    | [RDT-1B](policy/RDT_1B/README.md)                    | [RISE](policy/RISE/README.md)               | [SmolVLA](policy/SmolVLA/README.md)                        | [Spatial Forcing](policy/Spatial_Forcing/README.md)            | [Spirit v1.5](policy/Spirit_v15/README.md)        |
-| [TinyVLA](policy/TinyVLA/README.md)      | [X-VLA](policy/X_VLA/README.md)                      | [X-WAM](policy/X_WAM/README.md)             | [Xiaomi-Robotics-0](policy/Xiaomi_Robotics_0/README.md)    | [Xiaomi-Robotics-1 (XR-1)](policy/Xiaomi_Robotics_1/README.md) | [StarVLA](policy/starVLA/README.md)               |
-| [ACT](policy/ACT/README.md)              | [DP](policy/DP/README.md)                            | [demo_policy](policy/demo_policy/README.md) |                                                            |                                                                |                                                   |
+| [TinyVLA](policy/TinyVLA/README.md)      | [X-VLA](policy/X_VLA/README.md)                      | [X-WAM](policy/X_WAM/README.md)             | [Xiaomi-Robotics-0](policy/Xiaomi_Robotics_0/README.md)    | [Xiaomi-Robotics-1 (XR-1)](policy/Xiaomi_Robotics_1/README.md) | [StarVLA](policy/StarVLA/README.md)               |
+| [ACT](policy/ACT/README.md) | [DP](policy/DP/README.md) | [Evo-1](policy/Evo_1/README.md) | [InternW0_delta](policy/InternW0_delta/README.md) | [KinRT](policy/KinRT/README.md) | [PatchWAM-Lite](policy/PatchWAM/README.md) |
+| [Awomo-0.5](policy/Awomo05/README.md) | [MoPA](policy/MoPA/README.md) | [PhysicalRSI](policy/physicalRSI/README.md) | [Simate-beta](policy/Simate_beta/README.md) | [SimpleMemVLA](policy/SimpleMemVLA/README.md) | [WorldScape Policy 2.0](policy/WorldScape_Policy_2/README.md) |
+| [GPT-6-Astra-Direct-EEF](policy/GPT_6_Astra_Direct_EEF/README.md) | [VPP2](policy/VPP2/README.md) | [Liber-0 Lite](policy/Liber_0_lite/README.md) | [Liber-0 Preview](policy/Liber_0_preview/README.md) | [Discrete Forcing](policy/Discrete_Forcing/README.md) | [EgoVLA](policy/EgoVLA/README.md) |
+| [MM-ABC](policy/MM_ABC/README.md) | [HWM-CogWAM](policy/HWM_CogWAM/README.md) | [ME-Brain-1.0](policy/ME_Brain_1/README.md) | [ME-U0](policy/ME_U0/README.md) | [ME-Dex-1.0](policy/ME_Dex_1_0/README.md) | [Rex_M1_preview](policy/Rex_M1_preview/README.md) |
+| [Spark_0](policy/Spark_0/README.md) | [ViGAR](policy/ViGAR/README.md) | | | | |
+| [demo_policy](policy/demo_policy/README.md) | | | | | |
 
 
 接入自有策略，或报名排行榜，都通过 PR —— 见 [接入你自己的策略](#-接入你自己的策略)。
@@ -489,6 +497,7 @@ python scripts/transform_lerobot_v21_format.py "<bench_name>.*.*" \
 - **三个相机键始终存在。** 源数据缺失的相机会用黑帧填充，使特征跨机器人稳定。
 - **图像为 RGB**，经 `decode_image_bit` 解码后不再交换通道（见[上文](#图像解码只能走-decode_image_bit)）。
 - **仅支持关节空间双臂。** 二者读取 `*_arm_joint_states` / `*_ee_joint_states`，对仅含位姿或单臂键的轨迹会失败。
+- **视频默认为 AV1。** `DatasetConfig.vcodec` 选择编码器：`libsvtav1` 为 AV1，`h264_nvenc` 为 H.264。
 - 两个版本除数据集版本外，只在编码吞吐上不同：v3.0 用 8 个 worker 写图，并以 CRF 18 流式写视频。
 
 </details>
