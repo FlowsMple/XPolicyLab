@@ -41,6 +41,7 @@ XPolicyLab 是策略代码与评测环境之间的共享层。每个模型的依
 - [数据与 Checkpoint](#-数据与-checkpoint)
 - [接入你自己的策略](#-接入你自己的策略)
 - [编程 Agent](#-编程-agent)
+- [在 RoboTwin 上做 RL 训练](#在-robotwin-上做-rl-训练)
 - [引用](#-引用)
 - [联系方式](#-联系方式)
 
@@ -129,7 +130,8 @@ policy/<POLICY>/
 ├── setup_eval_env_client.sh     # environment-side client
 ├── deploy.yml                   # deployment config
 ├── deploy.py                    # deployment loop
-└── model.py                     # model adapter, served by the policy server
+├── model.py                     # model adapter, served by the policy server
+└── rl.py                        # optional RLinf fill-in: _sample_policy, _log_prob_value
 ```
 
 `model.py` 实现面向模型的 API。`deploy.py` 把环境观测桥接到模型 server 调用。最小参考见 [policy/demo_policy](policy/demo_policy/README.md)。
@@ -145,7 +147,11 @@ policy/<POLICY>/
 | `get_action()`                        | 返回一个动作 chunk（动作字典列表）。                                                |
 | `get_action_batch(env_idx_list=None)` | 返回与活跃环境索引对齐的 batch 动作 chunk。                                         |
 | `reset()`                             | 在评测 episode 之间清空模型侧状态。无参数 —— 需要首帧观测的策略应先 `reset()`，再正常 `update_obs`。 |
+| `predict_action_batch_rl(obs_list, mode="train", compute_values=True)` | 可选的 RLinf rollout。动作为 `pack_robot_state` 顺序的 `[B, H, D]`，并带 `prev_logprobs`、`prev_values`（`[B, 1]`）和 `forward_inputs`。 |
+| `compute_logprob_value(forward_inputs, compute_values=False)` | 可选。带梯度重算该样本：`logprobs`（与 `prev_logprobs` 同形）、`values`（`[B]`）、`entropy`（`[B, 1]`）。 |
 
+
+RLinf 的 PPO 与 GRPO 使用上面两个可选方法。填空样例是 [policy/demo_policy](policy/demo_policy/README.md#rl-training)：在 `rl.py` 里实现 `_sample_policy` 和 `_log_prob_value`，把可训练的 `nn.Module` 放到 `self.model` 或 `self.policy`，log-prob 真实可用后再把 `"ppo"` 或 `"grpo"` 加进 `RL_MODES`。`RL_MODES = ("eval",)` 时，评测仍使用 `get_action` / `get_action_batch`。
 
 策略 server 在 `update_obs` / `update_obs_batch` 之前已解码相机颜色，因此 `obs["vision"][<camera>]["color"]` 始终是图像数组 —— `model.py` 从不解码。
 
@@ -516,6 +522,21 @@ python scripts/transform_lerobot_v21_format.py "<bench_name>.*.*" \
 - `xpolicylab-adapter-check` —— PR 前审计（`Check policy/<POLICY_NAME>`）。
 
 不支持这些机制时要粘贴的清单在 [CONTRIBUTING.md](CONTRIBUTING.md#using-a-coding-agent)。
+
+## 在 RoboTwin 上做 RL 训练
+
+`infra/RLinf/` 用上游 RLinf 训练 XPolicyLab 策略。RLinf 检出是子模块 `infra/RLinf/RLinf`，本身不修改。在包含该 XPolicyLab 子模块的 RoboTwin 检出中：
+
+```bash
+git submodule update --init --recursive
+export ROBOTWIN_ASSETS_PATH=/path/to/robotwin_assets
+export POLICY_MODEL_PATH=/path/to/policy_checkpoint
+bash XPolicyLab/infra/RLinf/run.sh robotwin_adjust_bottle_grpo_xpolicylab_pi05
+```
+
+`adjust_bottle` 配置覆盖 Pi_05 GRPO 与 Abot_M0 PPO，以及对应的 eval 配置。这些配置开启 eval 视频。训练视频保持关闭。启动前设置 `ROBOTWIN_ASSETS_PATH` 和 `POLICY_MODEL_PATH`。日志与 checkpoint 写到 `infra/RLinf/results`（按 `RLINF_PATH` 解析，不在 RoboTwin 检出根目录）。
+
+adapter 填空样例是 [policy/demo_policy](policy/demo_policy/README.md#rl-training)。在 `rl.py` 里实现 `_sample_policy` 和 `_log_prob_value`，把可训练的 `nn.Module` 放到 `self.model` 或 `self.policy`，log-prob 真实可用后再把 `"ppo"` 或 `"grpo"` 加进 `RL_MODES`。`required_mode: eval` 仍使用 `get_action_batch`。
 
 ## 📝 引用
 

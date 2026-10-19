@@ -41,6 +41,7 @@ Start here for repo-level concepts and integration steps. For install commands, 
 - [Data And Checkpoints](#-data-and-checkpoints)
 - [Add Your Own Policy](#-add-your-own-policy)
 - [Coding Agents](#-coding-agents)
+- [RL training on RoboTwin](#rl-training-on-robotwin)
 - [Citation](#-citation)
 - [Contact](#-contact)
 
@@ -129,7 +130,8 @@ policy/<POLICY>/
 ├── setup_eval_env_client.sh     # environment-side client
 ├── deploy.yml                   # deployment config
 ├── deploy.py                    # deployment loop
-└── model.py                     # model adapter, served by the policy server
+├── model.py                     # model adapter, served by the policy server
+└── rl.py                        # optional RLinf fill-in: _sample_policy, _log_prob_value
 ```
 
 `model.py` implements the model-facing API. `deploy.py` bridges environment observations to model-server calls. Use [policy/demo_policy](policy/demo_policy/README.md) as the minimal adapter reference.
@@ -145,7 +147,11 @@ policy/<POLICY>/
 | `get_action()`                        | Return one action chunk as a list of action dictionaries.                                                                                                                 |
 | `get_action_batch(env_idx_list=None)` | Return batched action chunks aligned with active environment indices.                                                                                                     |
 | `reset()`                             | Clear model-side state between evaluation episodes. It takes no arguments — a policy that needs a first observation should `reset()` and then take a normal `update_obs`. |
+| `predict_action_batch_rl(obs_list, mode="train", compute_values=True)` | Optional RLinf rollout. Actions are `[B, H, D]` in `pack_robot_state` order, with `prev_logprobs`, `prev_values` (`[B, 1]`), and `forward_inputs`. |
+| `compute_logprob_value(forward_inputs, compute_values=False)` | Optional. Recompute that sample with gradients: `logprobs` (same shape as `prev_logprobs`), `values` (`[B]`), and `entropy` (`[B, 1]`). |
 
+
+RLinf PPO and GRPO use the two optional methods above. The fill-in is [policy/demo_policy](policy/demo_policy/README.md#rl-training): implement `_sample_policy` and `_log_prob_value` in `rl.py`, put the trainable `nn.Module` on `self.model` or `self.policy`, and add `"ppo"` or `"grpo"` to `RL_MODES` once the log-probs are real. With `RL_MODES = ("eval",)`, evaluation keeps using `get_action` / `get_action_batch`.
 
 The policy server decodes camera colors before `update_obs` / `update_obs_batch`, so `obs["vision"][<camera>]["color"]` always arrives as an image array — `model.py` never decodes.
 
@@ -516,6 +522,21 @@ Two skills under [.agents/skills](.agents/skills) are loaded by Cursor, Claude C
 - `xpolicylab-adapter-check` — audit one before a PR (`Check policy/<POLICY_NAME>`).
 
 The paste-in checklist for agents that load none of these is in [CONTRIBUTING.md](CONTRIBUTING.md#using-a-coding-agent).
+
+## RL training on RoboTwin
+
+`infra/RLinf/` trains XPolicyLab policies with upstream RLinf. The RLinf checkout is the submodule `infra/RLinf/RLinf` and is not modified. From a RoboTwin checkout that contains this XPolicyLab submodule:
+
+```bash
+git submodule update --init --recursive
+export ROBOTWIN_ASSETS_PATH=/path/to/robotwin_assets
+export POLICY_MODEL_PATH=/path/to/policy_checkpoint
+bash XPolicyLab/infra/RLinf/run.sh robotwin_adjust_bottle_grpo_xpolicylab_pi05
+```
+
+`adjust_bottle` configs cover Pi_05 GRPO and Abot_M0 PPO, plus matching eval configs. Eval video is enabled in those configs. Training video stays off. Set `ROBOTWIN_ASSETS_PATH` and `POLICY_MODEL_PATH` before launch. Logs and checkpoints go under `infra/RLinf/results` (resolved from `RLINF_PATH`, not the RoboTwin checkout root).
+
+The adapter fill-in is [policy/demo_policy](policy/demo_policy/README.md#rl-training). Implement `_sample_policy` and `_log_prob_value` in `rl.py`, put the trainable `nn.Module` on `self.model` or `self.policy`, and add `"ppo"` or `"grpo"` to `RL_MODES` once those log-probs are real. `required_mode: eval` keeps using `get_action_batch`.
 
 ## 📝 Citation
 

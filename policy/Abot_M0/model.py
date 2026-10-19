@@ -269,10 +269,13 @@ def _checkpoint_run_dir(checkpoint_path: Path) -> Path:
 
 
 class Model(ModelTemplate):
+    RL_MODES = ("eval", "ppo", "grpo")
+    ACTION_TYPE = "joint"
+
     def __init__(self, model_cfg: dict[str, Any]):
         self.model_cfg = dict(model_cfg)
         self.task_name = self.model_cfg.get("task_name", "default_task")
-        self.action_type = self.model_cfg.get("action_type", "joint")
+        self.action_type = self.model_cfg.get("action_type", self.ACTION_TYPE)
         self.env_cfg_type = self.model_cfg["env_cfg_type"]
         self.robot_action_dim_info = get_robot_action_dim_info(self.env_cfg_type)
         self.default_prompt = self.model_cfg.get("prompt") or self.task_name
@@ -284,22 +287,36 @@ class Model(ModelTemplate):
         _ensure_dataset_statistics(_checkpoint_run_dir(self.ckpt_path), self.unnorm_key)
         print(f"[Abot_M0] Loading checkpoint: {self.ckpt_path}")
 
-        self.model = baseframework.from_pretrained(str(self.ckpt_path))
-        self.model = self.model.to(self.device).eval()
-        stats_key = baseframework._check_unnorm_key(self.model.norm_stats, self.unnorm_key)
-        self.action_norm_stats = dict(self.model.norm_stats[stats_key]["action"])
+        base_model = baseframework.from_pretrained(str(self.ckpt_path))
+        stats_key = baseframework._check_unnorm_key(base_model.norm_stats, self.unnorm_key)
+        self.action_norm_stats = dict(base_model.norm_stats[stats_key]["action"])
         probe = self.action_norm_stats.get("min", self.action_norm_stats.get("q01"))
         if probe is not None and _looks_like_modality_order_stats(probe):
             self.action_norm_stats = _permute_action_norm_stats(self.action_norm_stats)
             print("[Abot_M0] Permuted action norm stats from modality layout to training layout.")
         self.action_chunk_size = int(
-            self.model.config.framework.action_model.future_action_window_size + 1
+            base_model.config.framework.action_model.future_action_window_size + 1
         )
-        image_size = getattr(self.model.config.datasets.vla_data, "image_size", [224, 224])
+        image_size = getattr(base_model.config.datasets.vla_data, "image_size", [224, 224])
         if isinstance(image_size, (list, tuple)) and len(image_size) == 2:
             self.image_size = (int(image_size[1]), int(image_size[0]))
         else:
             self.image_size = (224, 224)
+
+        if any(mode in self.get_rl_modes() for mode in ("ppo", "grpo")):
+            from .rl import AbotRLConfig, AbotRLPolicy
+
+            if self.include_state:
+                raise NotImplementedError("Abot_M0 RL supports include_state=false checkpoints only.")
+            rl_head = dict(self.model_cfg.get("rl_head") or {})
+            rl_head.setdefault("action_chunk", int(self.model_cfg.get("num_action_chunks", self.action_chunk_size)))
+            rl_head.setdefault("add_value_head", bool(self.model_cfg.get("add_value_head", False)))
+            self.rl_config = AbotRLConfig.from_dict(rl_head)
+            # The RL policy is placed on device by the trainer.
+            self.model = AbotRLPolicy(base_model, self.rl_config)
+            print(f"[Abot_M0] RL policy | modes={self.get_rl_modes()} | {self.rl_config}")
+        else:
+            self.model = base_model.to(self.device).eval()
 
         self._latest_env_idx_list = [0]
         self._latest_payloads: dict[int, dict[str, Any]] = {}
@@ -366,6 +383,16 @@ class Model(ModelTemplate):
         if missing_envs:
             raise KeyError(f"Missing observations for env_idx: {missing_envs}")
 
+        if hasattr(self, "rl_config"):
+            payloads = [self._latest_payloads[env_idx] for env_idx in env_idx_list]
+            actions, _ = self._sample_rl(
+                [payload["image"] for payload in payloads], [payload["lang"] for payload in payloads], "eval", False
+            )
+            return [
+                unpack_robot_state(chunk, self.action_type, self.robot_action_dim_info, source_type="obs")
+                for chunk in actions
+            ]
+
         results = []
         for env_idx in env_idx_list:
             raw_actions = self._infer_payload(self._latest_payloads[env_idx])
@@ -382,3 +409,49 @@ class Model(ModelTemplate):
     def reset(self) -> None:
         self._latest_env_idx_list = [0]
         self._latest_payloads = {}
+
+    def predict_action_batch_rl(self, obs_list, mode="train", compute_values=True, **kwargs):
+        if not hasattr(self, "rl_config"):
+            raise NotImplementedError(self._error_msg("Abot_M0 RL policy is not loaded; set rl.modes to include ppo or grpo."))
+        payloads = [self._encode_obs(obs) for obs in obs_list]
+        actions, outputs = self._sample_rl(
+            [payload["image"] for payload in payloads], [payload["lang"] for payload in payloads], mode, compute_values
+        )
+        device = outputs["chains"].device
+        forward_inputs = {
+            "vl_embs": outputs["vl_embs"],
+            "vl_mask": outputs["vl_mask"],
+            "chains": outputs["chains"],
+            "denoise_inds": outputs["denoise_inds"],
+            "action": torch.from_numpy(actions.reshape(actions.shape[0], -1)).to(device),
+        }
+        extras = {
+            "prev_logprobs": outputs["prev_logprobs"],
+            "prev_values": outputs["prev_values"],
+            "forward_inputs": forward_inputs,
+        }
+        return actions, extras
+
+    def compute_logprob_value(self, forward_inputs, compute_values=False, **kwargs):
+        if not hasattr(self, "rl_config"):
+            raise NotImplementedError(self._error_msg("Abot_M0 RL policy is not loaded; set rl.modes to include ppo or grpo."))
+        return self.model.get_log_prob_value(
+            forward_inputs["vl_embs"],
+            forward_inputs["vl_mask"].bool(),
+            forward_inputs["chains"],
+            forward_inputs["denoise_inds"],
+            compute_values=compute_values,
+        )
+
+    def _sample_rl(self, batch_images, instructions, mode, compute_values):
+        """Run the RL sampler; return env actions ``[B, H, D]`` in modality layout and raw outputs."""
+        vl_embs, vl_mask = self.model.encode(batch_images, instructions)
+        outputs = self.model.sample_actions_rl(vl_embs, vl_mask, mode=mode, compute_values=compute_values)
+        normalized = outputs["actions"].detach().float().cpu().numpy()
+        actions = np.stack(
+            [
+                train_layout_to_modality_layout(_unnormalize_actions_train_layout(chunk, self.action_norm_stats))
+                for chunk in normalized
+            ]
+        )[:, : self.rl_config.action_chunk].astype(np.float32)
+        return actions, {**outputs, "vl_embs": vl_embs, "vl_mask": vl_mask}

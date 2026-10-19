@@ -53,6 +53,19 @@ EVAL_ENV_TYPE=debug bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 0 0 <p
 
 `EVAL_ENV_TYPE=debug` runs the offline wiring check (no simulator); leave it unset or set `EVAL_ENV_TYPE=sim` for RoboDojo simulation. For split-machine deployment via `setup_eval_policy_server.sh` / `setup_eval_env_client.sh`, follow the [Deployment Flow](../../README.md#-deployment-flow).
 
+## RL training
+
+`rl.py` is the RLinf fill-in. `RL_MODES` is `("eval",)`, so a run with `required_mode: eval` keeps using `get_action` / `get_action_batch`.
+
+To train with PPO or GRPO:
+
+1. Implement `_sample_policy` and `_log_prob_value` in `rl.py`. `sample_actions_rl` and `get_log_prob_value` already return the shapes RLinf expects. Log-probs have to come from the policy sample.
+2. Assign the trainable `nn.Module` to `self.model` or `self.policy` in `Model.__init__`.
+3. Add `"ppo"` and/or `"grpo"` to `Model.RL_MODES`.
+4. Set `actor.model.xpolicylab.required_mode` to that mode. Launch steps are in [RL training on RoboTwin](../../README.md#rl-training-on-robotwin).
+
+`predict_action_batch_rl` returns actions `[B, H, D]` in `pack_robot_state` order, plus `prev_logprobs`, `prev_values` (`[B, 1]`), and `forward_inputs`. `compute_logprob_value` returns `logprobs` (same shape as `prev_logprobs`), `values` (`[B]`), and `entropy` (`[B, 1]`).
+
 ## Notes
 
 - When replacing these stubs with a real policy, keep `ckpt_name` stable between data processing, training, and evaluation.
