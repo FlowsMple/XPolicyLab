@@ -18,15 +18,15 @@ import hydra
 import torch.multiprocessing as mp
 from omegaconf import open_dict
 from omegaconf.omegaconf import OmegaConf
-
-from XPolicyLab.infra.RLinf.register import register
-from XPolicyLab.infra.RLinf.rollout_worker import XPolicyLabRolloutWorker
 from rlinf.config import validate_cfg
 from rlinf.runners.embodied_runner import EmbodiedRunner
 from rlinf.scheduler import Cluster
 from rlinf.utils.placement import HybridComponentPlacement
 from rlinf.workers.env.env_worker import EnvWorker
 from rlinf.workers.reward import EmbodiedAPIRewardWorker, EmbodiedRewardWorker
+
+from XPolicyLab.infra.RLinf.register import register
+from XPolicyLab.infra.RLinf.rollout_worker import XPolicyLabRolloutWorker
 
 mp.set_start_method("spawn", force=True)
 
@@ -40,6 +40,10 @@ _REWARD_SERVER_COMPONENT_NAME = "reward_server"
 )
 def main(cfg) -> None:
     register()
+    xcfg = cfg.actor.model.get("xpolicylab", {})
+    openwam_nft = xcfg.get("required_mode") == "nft" and xcfg.get("policy_name") == "OpenWAM"
+    if openwam_nft and cfg.algorithm.loss_type != "embodied_nft":
+        raise ValueError("The experimental NFT entry requires OpenWAM + embodied_nft.")
     cfg = validate_cfg(cfg)
     print(json.dumps(OmegaConf.to_container(cfg, resolve=True), indent=2))
 
@@ -94,6 +98,10 @@ def main(cfg) -> None:
         from rlinf.workers.actor.fsdp_nft_policy_worker import EmbodiedNFTFSDPPolicy
 
         actor_worker_cls = EmbodiedNFTFSDPPolicy
+        if openwam_nft:
+            from XPolicyLab.infra.RLinf.openwam_nft_worker import OpenWAMNFTWorker
+
+            actor_worker_cls = OpenWAMNFTWorker
     else:
         if use_training_pipeline:
             from rlinf.workers.actor.fsdp_actor_worker_pipeline import (
@@ -118,7 +126,12 @@ def main(cfg) -> None:
 
     # Create env worker group
     env_placement = component_placement.get_strategy("env")
-    env_group = EnvWorker.create_group(cfg).launch(
+    env_worker_cls = EnvWorker
+    if openwam_nft:
+        from XPolicyLab.infra.RLinf.openwam_env import OpenWAMEnvWorker
+
+        env_worker_cls = OpenWAMEnvWorker
+    env_group = env_worker_cls.create_group(cfg).launch(
         cluster, name=cfg.env.group_name, placement_strategy=env_placement
     )
 

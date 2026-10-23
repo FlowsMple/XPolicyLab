@@ -177,8 +177,13 @@ def _to_pil(value: Any, ctx: str):
 
 
 class Model(ModelTemplate):
+    RL_MODES = ("eval", "nft")
+
     def __init__(self, model_cfg):
         self.model_cfg = dict(model_cfg)
+        self.benchmark = str(self.model_cfg.get("openwam_benchmark") or "robodojo").lower()
+        if self.benchmark not in ("robodojo", "robotwin"):
+            raise ValueError("openwam_benchmark must be robodojo or robotwin.")
 
         action_type = self.model_cfg.get("action_type") or "ee"
         if action_type != "ee":
@@ -187,6 +192,11 @@ class Model(ModelTemplate):
         if not env_cfg_type:
             raise ValueError("env_cfg_type is required for the OpenWAM adapter.")
         dim_info = get_robot_action_dim_info(env_cfg_type)
+        self.action_type = action_type
+        self.robot_action_dim_info = dim_info
+        if "nft" in self.get_rl_modes():
+            if self.benchmark != "robotwin" or not self.model_cfg.get("experimental_nft", False):
+                raise ValueError("NFT requires RoboTwin and explicit experimental_nft=true.")
         if list(dim_info.get("arm_dim") or []) != _EXPECTED_ARM_DIMS or list(dim_info.get("ee_dim") or []) != _EXPECTED_EE_DIMS:
             raise ValueError(
                 "OpenWAM's RoboDojo checkpoint is dual-X5 only (arm_dim [6, 6], ee_dim [1, 1]); "
@@ -203,7 +213,7 @@ class Model(ModelTemplate):
 
         self._poses = _poses
         self._format_prompt = format_prompt_for_inference
-        self._calibration = arx_x5_calibration()
+        self._calibration = arx_x5_calibration() if self.benchmark == "robodojo" else None
 
         self.default_instruction = str(self.model_cfg.get("default_instruction") or "follow the instruction")
         replan = self.model_cfg.get("replan_steps")
@@ -216,6 +226,8 @@ class Model(ModelTemplate):
         self._order: list[int] = []
 
         self.allow_dummy_policy = _is_true(self.model_cfg.get("allow_dummy_policy", False))
+        if self.allow_dummy_policy and "nft" in self.get_rl_modes():
+            raise ValueError("Dummy policy cannot be used for NFT training.")
         self._engine = None
         self._wam_policy = None
         self._preprocessor = None
@@ -233,7 +245,6 @@ class Model(ModelTemplate):
         device = str(self.model_cfg.get("device") or "cuda")
 
         from omegaconf import OmegaConf
-
         from openwam.deploy.server import _load_deploy_yaml, build_server_from_config
 
         deploy_cfg = _load_deploy_yaml(deploy_config)
@@ -251,6 +262,39 @@ class Model(ModelTemplate):
         self._engine = server.engine
         self._wam_policy = server._policy  # for the binary-dim legality projection
         self._preprocessor = server._obs_preprocessor
+
+        if self.benchmark == "robotwin":
+            from openwam.dataloader.utils.unify_action import parse_unify_spec
+
+            from .rl import OpenWAMNFTPolicy
+
+            saved = OmegaConf.load(str(Path(ckpt_dir) / "config.yaml"))
+            if OmegaConf.select(saved, "dataloader.type") != "robotwin":
+                raise ValueError("RoboTwin mode requires a RoboTwin checkpoint.")
+            if self._engine.architecture.repr_contract.get("representation") != "eef":
+                raise ValueError("First RoboTwin adapter requires an EEF checkpoint.")
+            arch = self._engine.architecture
+            if type(arch).__name__ != "DualSystemSelfAttnArchitecture":
+                raise NotImplementedError("First experiment supports dual_system joint_self_attn only.")
+            if float(self._engine._cfg_scale) != 1.0:
+                raise ValueError("First experiment requires checkpoint-compatible CFG scale 1.")
+            if str(server.cfg.inference.denoise_mode) != "sync":
+                raise ValueError("First experiment supports sync denoising only.")
+            valid = np.zeros(arch.action_dim, dtype=bool)
+            if OmegaConf.select(saved, "dataloader.unify_action", default=False):
+                indices = parse_unify_spec(OmegaConf.to_container(saved.dataloader.unify_action_map))
+            else:
+                indices = np.arange(20)
+            indices = np.asarray(indices, dtype=np.int64)
+            if len(indices) != 20 or len(np.unique(indices)) != 20 or np.any(indices < 0) or np.any(indices >= arch.action_dim):
+                raise ValueError("Expected 20 active RoboTwin EEF model dimensions.")
+            valid[indices] = True
+            self.policy = OpenWAMNFTPolicy(arch, server.cfg.inference.denoise_steps, valid)
+            if int(self.model_cfg.get("num_action_chunks", 1)) != 1:
+                raise ValueError("First NFT experiment executes one action per chunk.")
+            if self.replan_steps not in (None, 1):
+                raise ValueError("First RoboTwin experiment requires replan_steps=1.")
+            self.replan_steps = 1
 
         if self.replan_steps is None:
             horizon = OmegaConf.select(server.cfg, "inference.inference_horizon", default=None)
@@ -271,6 +315,10 @@ class Model(ModelTemplate):
     # Observation: obs dict -> OpenWAM conditions (world -> base -> EEF20)
     # ------------------------------------------------------------------
     def _state_to_eef20(self, state: Mapping) -> np.ndarray:
+        if self.benchmark == "robotwin":
+            from .robotwin import state_to_eef20
+
+            return state_to_eef20(state)
         missing = [k for k in ("left_ee_pose", "left_ee_joint_state", "right_ee_pose", "right_ee_joint_state") if k not in state]
         if missing:
             raise KeyError(f"obs['state'] is missing required field(s): {', '.join(missing)}")
@@ -302,6 +350,8 @@ class Model(ModelTemplate):
             raise ValueError("obs['vision'] must be a mapping of camera name -> {'color': image}")
         images = {}
         for camera_name, payload_name in _CAMERA_TO_PAYLOAD.items():
+            if camera_name == "cam_head" and self.benchmark == "robotwin":
+                camera_name = "cam_high"
             camera = vision.get(camera_name)
             if not isinstance(camera, Mapping) or "color" not in camera:
                 raise KeyError(f"missing required camera vision/{camera_name}/color")
@@ -337,6 +387,10 @@ class Model(ModelTemplate):
     # Action: EEF20 chunk (base frame) -> env-relative world ee dicts
     # ------------------------------------------------------------------
     def _eef20_chunk_to_native(self, chunk: np.ndarray) -> list[dict]:
+        if self.benchmark == "robotwin":
+            from .robotwin import eef20_to_steps
+
+            return eef20_to_steps(chunk)
         left_pose, left_grip, right_pose, right_grip = self._poses.eef20_to_arms(np.asarray(chunk, dtype=np.float64))
         left = self._calibration["arms"]["left"]
         right = self._calibration["arms"]["right"]
@@ -408,6 +462,10 @@ class Model(ModelTemplate):
             return [self._hold_position_chunk(p) for p in payloads]
 
         conditions = [self._conditions(p) for p in payloads]
+        if self.benchmark == "robotwin":
+            self.policy.sync_runtime()
+            for condition in conditions:
+                condition["seed"] = int(self.model_cfg.get("seed", 42))
         result = self._engine.generate_batch(conditions)
         actions = result["actions"]
         if hasattr(actions, "cpu"):
@@ -430,3 +488,40 @@ class Model(ModelTemplate):
     def reset(self):
         self._batch = {}
         self._order = []
+
+    def predict_action_batch_rl(self, obs_list, mode="train", compute_values=False, **kwargs):
+        import torch
+
+        from XPolicyLab.utils.process_data import pack_robot_state
+
+        from .rl import JointReplay
+
+        if self.benchmark != "robotwin" or not hasattr(self, "policy"):
+            raise NotImplementedError("NFT is only implemented for RoboTwin EEF.")
+        if mode not in ("train", "eval"):
+            raise ValueError(f"Unknown rollout mode: {mode}")
+        self.policy.sync_runtime()
+        conditions = [self._conditions(self._encode_obs(obs)) for obs in obs_list]
+        seeds = torch.randint(0, 2**31 - 1, (len(conditions),)) if mode == "train" else [int(self.model_cfg.get("seed", 42))] * len(conditions)
+        for condition, seed in zip(conditions, seeds):
+            condition["seed"] = int(seed)
+        selected_step = kwargs.get("nft_step_index")
+        if selected_step is None:
+            selected_step = int(torch.randint(self.policy.num_steps, ()).item())
+        if not 0 <= int(selected_step) < self.policy.num_steps:
+            raise ValueError("nft_step_index is outside the denoising schedule.")
+        replay = JointReplay(int(selected_step))
+        result = self._engine.generate_batch(conditions, step_observer=replay)
+        raw = self._wam_policy._project_binary_dims(result["actions"])
+        actions = np.stack([
+            np.stack([pack_robot_state({"state": step}, "ee", self.robot_action_dim_info)
+                      for step in self._eef20_chunk_to_native(row[:1])])
+            for row in raw
+        ])
+        data = replay.data
+        data["nft_sigma"] = data["nft_action_t"].float() / float(self.policy.architecture.action_scheduler.num_train_timesteps)
+        data["nft_valid_dims"] = self.policy.valid_dims.detach().cpu()[None].expand(len(conditions), -1).clone()
+        return actions, {"forward_inputs": data}
+
+    def nft_forward(self, forward_inputs, **kwargs):
+        return self.policy(forward_inputs)

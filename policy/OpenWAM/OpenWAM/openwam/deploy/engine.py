@@ -385,7 +385,7 @@ class JointInferenceEngine(BaseInferenceEngine):
     )
 
     @torch.no_grad()
-    def generate_batch(self, conditions_list: list) -> dict:
+    def generate_batch(self, conditions_list: list, *, step_observer=None) -> dict:
         """Generate actions for B independent observations in one forward pass.
 
         Each element of ``conditions_list`` mirrors the single-request
@@ -514,4 +514,5 @@ class JointInferenceEngine(BaseInferenceEngine):
             profile=self._profile,
             prompt_embed_cache=self._prompt_embed_cache,
             proprio=proprio,
+            step_observer=step_observer,
         )

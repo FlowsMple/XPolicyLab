@@ -1542,6 +1542,7 @@ class BaseWAMArchitecture(ABC, nn.Module):
         cfg_scale_f: float = 1.0,
         cfg_merge: bool = False,
         inactive_action_dims: Optional[Tensor] = None,
+        step_observer=None,
     ) -> Tensor:
         """Schedule-driven joint denoising loop shared by ``generate`` (B=1) and
         ``generate_batch`` (B>=1).
@@ -1618,6 +1619,13 @@ class BaseWAMArchitecture(ABC, nn.Module):
                 if dit_cache is not None and video_stepping:
                     dit_cache.update(noise_pred, sigma_v, action_noise_pred)
 
+            if step_observer is not None:
+                step_observer.record(
+                    index=i, schedule=schedule, inputs=inputs_shared,
+                    actions=action_latents, velocity=action_noise_pred,
+                    video_timestep=v_timestep, action_timestep=a_timestep,
+                )
+
             if video_stepping:
                 new_latents = inputs_shared["latents"] + noise_pred * (sigma_v_next - sigma_v)
                 ref_latents = inputs_shared.get("first_frame_latents")
@@ -1658,6 +1666,7 @@ class BaseWAMArchitecture(ABC, nn.Module):
         prompt_embed_cache: Optional[dict] = None,
         proprio: Optional[Tensor] = None,
         active_action_mask: Optional[Tensor] = None,
+        step_observer=None,
     ) -> dict:
         """Batched joint denoising: one forward pass over B independent samples.
 
@@ -1782,7 +1791,11 @@ class BaseWAMArchitecture(ABC, nn.Module):
             cfg_scale_f=1.0,
             cfg_merge=False,
             inactive_action_dims=inactive_action_dims,
+            step_observer=step_observer,
         )
+
+        if step_observer is not None:
+            step_observer.finish(action_latents)
 
         if profile:
             if torch.cuda.is_available():

@@ -106,7 +106,7 @@ class ModelTemplate:
     # ---- Optional RL training contract (used by RLinf) ----
     # 可选的 RL 训练接口（RLinf 使用）
     #
-    # RL_MODES lists what the policy implements: "eval", "sft", "ppo", "grpo".
+    # RL_MODES lists implemented capabilities: eval, sft, ppo, grpo, nft.
     # deploy/train config ``rl.modes`` picks what one run enables (default: eval),
     # so plain serving never loads training-only code.
     # RL_MODES 声明策略实现了哪些模式；配置项 ``rl.modes`` 决定本次运行启用哪些（默认仅 eval）。
@@ -177,3 +177,10 @@ class ModelTemplate:
         raise NotImplementedError(
             self._error_msg("sft_forward() is not implemented.")
         )
+
+    def nft_forward(self, forward_inputs, **kwargs):
+        """Recompute recorded denoising predictions for an NFT objective.
+
+        重算 NFT 样本的去噪预测；此接口不声明 PPO/GRPO 概率能力。
+        """
+        raise NotImplementedError(self._error_msg("nft_forward() is not implemented."))

@@ -22,10 +22,15 @@ from typing import Any, Literal
 import numpy as np
 import torch
 import torch.nn as nn
-
 from rlinf.models.embodiment.base_policy import BasePolicy, ForwardType
 
-from .capabilities import RL_MODE_PPO, RL_TRAIN_MODES, require_rl_mode
+from .capabilities import (
+    RL_MODE_NFT,
+    RL_MODE_PPO,
+    RL_SAMPLE_MODES,
+    RL_TRAIN_MODES,
+    require_rl_mode,
+)
 from .obs import env_obs_to_xpolicy_obs_list, pack_action_steps
 
 
@@ -75,6 +80,10 @@ class XPolicyLabForRLActionPrediction(nn.Module, BasePolicy):
         self.num_action_chunks = int(num_action_chunks)
         self.required_mode = str(required_mode).strip().lower()
         self.declared_modes = require_rl_mode(xpolicy, self.required_mode)
+        if self.required_mode == RL_MODE_NFT:
+            for name in ("predict_action_batch_rl", "nft_forward"):
+                if not _is_overridden_rl_method(xpolicy, name):
+                    raise NotImplementedError(f"NFT policy must implement {name}.")
         if self.required_mode in RL_TRAIN_MODES:
             missing = [
                 name
@@ -100,6 +109,8 @@ class XPolicyLabForRLActionPrediction(nn.Module, BasePolicy):
             self._no_split_modules = getattr(backbone, "_no_split_modules", None)
             self._no_split_names = getattr(backbone, "_no_split_names", None)
         else:
+            if self.required_mode in RL_SAMPLE_MODES:
+                raise TypeError("Training requires a real nn.Module on policy or model.")
             self.backbone = nn.Identity()
             self._no_split_modules = None
             self._no_split_names = None
@@ -138,7 +149,7 @@ class XPolicyLabForRLActionPrediction(nn.Module, BasePolicy):
         )
         # Train and in-training eval share the RL sampler. A pure eval run keeps
         # get_action_batch, so an unfinished template can still define the methods.
-        if self.required_mode in RL_TRAIN_MODES:
+        if self.required_mode in RL_SAMPLE_MODES:
             actions, extras = self.xpolicy.predict_action_batch_rl(
                 obs_list,
                 mode=mode,
@@ -175,6 +186,8 @@ class XPolicyLabForRLActionPrediction(nn.Module, BasePolicy):
                     f"{self.required_mode} rollout needs prev_logprobs from the "
                     "XPolicyLab policy; do not invent a fake logprob."
                 )
+            # NFT's inherited transport uses this field for batch/version shapes,
+            # never for a probability ratio. PPO/GRPO still require real values.
             prev_logprobs = torch.zeros((batch_size, actions.shape[1]))
         prev_values = extras.get("prev_values")
         if prev_values is None:
@@ -196,6 +209,8 @@ class XPolicyLabForRLActionPrediction(nn.Module, BasePolicy):
         compute_values: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        if self.required_mode == RL_MODE_NFT:
+            raise RuntimeError("NFT samples have no log-probs; use ForwardType.NFT.")
         if not _is_overridden_rl_method(self.xpolicy, "compute_logprob_value"):
             raise NotImplementedError(
                 "XPolicyLab policy does not implement compute_logprob_value; "
@@ -211,6 +226,12 @@ class XPolicyLabForRLActionPrediction(nn.Module, BasePolicy):
                 "XPolicyLab policy does not implement nft_forward."
             )
         return self.xpolicy.nft_forward(forward_inputs, **kwargs)
+
+    def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs=None):
+        method = getattr(self.backbone, "gradient_checkpointing_enable", None)
+        if method is None:
+            raise NotImplementedError("Backbone does not support gradient checkpointing.")
+        method(gradient_checkpointing_kwargs=gradient_checkpointing_kwargs)
 
     def sft_forward(self, data: Any, **kwargs: Any) -> torch.Tensor:
         if not _is_overridden_rl_method(self.xpolicy, "sft_forward"):

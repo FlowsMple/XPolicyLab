@@ -22,9 +22,11 @@ RL_MODE_EVAL = "eval"
 RL_MODE_SFT = "sft"
 RL_MODE_PPO = "ppo"
 RL_MODE_GRPO = "grpo"
-SUPPORTED_RL_MODES = (RL_MODE_EVAL, RL_MODE_SFT, RL_MODE_PPO, RL_MODE_GRPO)
+RL_MODE_NFT = "nft"
+SUPPORTED_RL_MODES = (RL_MODE_EVAL, RL_MODE_SFT, RL_MODE_PPO, RL_MODE_GRPO, RL_MODE_NFT)
 # Modes whose rollout must record log-probs and whose update recomputes them.
 RL_TRAIN_MODES = (RL_MODE_PPO, RL_MODE_GRPO)
+RL_SAMPLE_MODES = (*RL_TRAIN_MODES, RL_MODE_NFT)
 
 
 def normalize_rl_modes(modes: Iterable[str] | None) -> tuple[str, ...]:

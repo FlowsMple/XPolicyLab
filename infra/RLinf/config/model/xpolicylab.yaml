@@ -13,6 +13,6 @@ add_value_head: False
 # Forwarded as the XPolicyLab policy ``model_cfg`` (same keys as its deploy.yml).
 xpolicylab:
   policy_name: null
-  # eval | sft | ppo | grpo. ppo / grpo enable the policy's RL path and are
+  # eval | sft | ppo | grpo | nft. ppo / grpo enable the policy's RL path and are
   # rejected if the policy does not list them in RL_MODES.
   required_mode: eval

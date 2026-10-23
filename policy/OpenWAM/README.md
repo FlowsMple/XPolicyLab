@@ -6,6 +6,8 @@
 
 Shared conventions — argument meanings, checkpoint naming, split-machine deployment, `EVAL_ENV_TYPE` — are documented in the [XPolicyLab README](../../README.md). Official results: [RoboDojo LeaderBoard](https://robodojo-benchmark.com/LeaderBoard).
 
+An experimental **RoboTwin EEF → RLinf NFT** path is available separately. See [RLinf experiment guide](RLINF_EXPERIMENTS.md) for server setup, replay/gradient probes, baseline evaluation, training, checkpoint recovery, and reporting. It has CPU contract tests only; GPU training and learning quality remain unverified. The RoboDojo commands below retain their existing role.
+
 ## Installation
 
 Create a Python >= 3.10 environment, then install the official PyTorch CUDA wheel before the adapter packages:
