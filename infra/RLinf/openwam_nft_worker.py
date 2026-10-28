@@ -3,7 +3,7 @@
 from rlinf.models.embodiment.base_policy import ForwardType
 from rlinf.workers.actor.fsdp_nft_policy_worker import EmbodiedNFTFSDPPolicy
 
-from XPolicyLab.policy.OpenWAM.rl import action_nft_loss
+from XPolicyLab.policy.OpenWAM.rl import action_nft_loss, restore_replay_pipeline
 
 
 class OpenWAMNFTWorker(EmbodiedNFTFSDPPolicy):
@@ -53,7 +53,9 @@ class OpenWAMNFTWorker(EmbodiedNFTFSDPPolicy):
     def _precompute_nft_training_inputs(self):
         # The inherited run loop uses prev_logprobs only as transport shapes.
         # Do not call its single-stream schedule or resampling helpers.
-        data = self.rollout_batch["forward_inputs"]
+        # Time and batch are already flattened. Group the transport keys
+        # before the inherited microbatch splitter walks this dict.
+        data = restore_replay_pipeline(self.rollout_batch["forward_inputs"])
         required = {
             "nft_pipeline",
             "nft_metadata",

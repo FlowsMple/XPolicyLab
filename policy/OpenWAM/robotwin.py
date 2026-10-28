@@ -31,8 +31,12 @@ def pose_order(pose, source, target):
 
 
 def state_to_eef20(state):
-    left = pose_order(state["left_ee_pose"], "wxyz", "xyzw")
-    right = pose_order(state["right_ee_pose"], "wxyz", "xyzw")
+    # Boundary poses are wxyz, matching transforms3d.mat2quat in this runtime.
+    # OpenWAM's RoboTwin dataloader and eval client feed those raw components
+    # to quat_xyzw_to_rot6d without swapping. Reordering here would change the
+    # rot6d the released checkpoint was trained on.
+    left = pose_order(state["left_ee_pose"], "wxyz", "wxyz")
+    right = pose_order(state["right_ee_pose"], "wxyz", "wxyz")
     return conversion.robotwin_endpose_to_eef20d(
         left, right, state["left_ee_joint_state"], state["right_ee_joint_state"]
     )
@@ -47,9 +51,9 @@ def eef20_to_steps(chunk):
         ee = conversion.eef20d_to_ee16d(row)
         steps.append(
             {
-                "left_ee_pose": pose_order(ee[:7], "xyzw", "wxyz"),
+                "left_ee_pose": pose_order(ee[:7], "wxyz", "wxyz"),
                 "left_ee_joint_state": np.clip(ee[7:8], 0, 1),
-                "right_ee_pose": pose_order(ee[8:15], "xyzw", "wxyz"),
+                "right_ee_pose": pose_order(ee[8:15], "wxyz", "wxyz"),
                 "right_ee_joint_state": np.clip(ee[15:16], 0, 1),
             }
         )

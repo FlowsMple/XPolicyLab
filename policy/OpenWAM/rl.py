@@ -1,10 +1,23 @@
 """Experimental on-policy, action-only NFT with recorded joint WAM conditions."""
 
 import json
-from typing import ClassVar
 
 import torch
 from torch import nn
+
+# Nested FSDP units. One flat parameter for the whole policy needs a second
+# copy of the 23 GiB checkpoint and does not fit on a 46 GiB L20.
+_FSDP_BLOCK_NAMES = (
+    "DiTBlock",
+    "T5SelfAttention",
+    "ResidualBlock",
+    "Down_ResidualBlock",
+    "Up_ResidualBlock",
+    "AttentionBlock",
+    "SelfAttnActionDiTBlock",
+    "CrossAttnActionDiTBlock",
+    "ExpertFFNBlock",
+)
 
 
 class JointReplay:
@@ -61,6 +74,67 @@ class JointReplay:
         if self.data is None:
             raise ValueError("Selected denoising step was not captured.")
         self.data["nft_x0"] = actions.detach().float().cpu().clone()
+
+
+# Trajectory.to_batch concatenates each top-level forward_inputs value on the
+# batch axis and does not walk nested dicts. Keep the capture format nested;
+# flatten only the copy that enters the rollout buffer.
+_NFT_PIPE_PREFIX = "nft_pipe."
+
+
+def flatten_replay_for_transport(data):
+    """Copy replay data so every transport value is a tensor."""
+    pipeline = data.get("nft_pipeline")
+    if not isinstance(pipeline, dict) or not pipeline:
+        raise ValueError("Replay nft_pipeline must be a non-empty dict of tensors.")
+    flat = {}
+    for key, value in data.items():
+        if key == "nft_pipeline":
+            continue
+        if not torch.is_tensor(value):
+            raise TypeError(f"Replay field {key} must be a tensor before transport.")
+        flat[key] = value
+    for key, value in pipeline.items():
+        if not torch.is_tensor(value):
+            raise TypeError(f"Replay pipeline field {key} must be a tensor.")
+        name = f"{_NFT_PIPE_PREFIX}{key}"
+        if name in flat or key.startswith(_NFT_PIPE_PREFIX):
+            raise ValueError(f"Replay pipeline field {key} collides with a transport key.")
+        flat[name] = value
+    return flat
+
+
+def restore_replay_pipeline(data):
+    """Rebuild nft_pipeline in place. Nested replay is left unchanged."""
+    prefixed = [key for key in data if str(key).startswith(_NFT_PIPE_PREFIX)]
+    if "nft_pipeline" in data:
+        if prefixed:
+            raise ValueError("Replay has both nft_pipeline and flattened pipeline fields.")
+        return data
+    if not prefixed:
+        raise ValueError("Replay is missing nft_pipeline.")
+    data["nft_pipeline"] = {
+        key[len(_NFT_PIPE_PREFIX) :]: data.pop(key) for key in prefixed
+    }
+    return data
+
+
+def _frozen_parameters_to_buffers(module):
+    """Keep frozen weights out of FSDP's second parameter copy.
+
+    use_orig_params flattens every nn.Parameter again. The video tower is
+    about 20 GiB, so that copy does not fit beside the live weights on one
+    L20. Buffers stay in the forward and still pass activation gradients.
+    """
+    for submodule in module.modules():
+        frozen_names = [
+            name
+            for name, param in list(submodule._parameters.items())
+            if param is not None and not param.requires_grad
+        ]
+        for name in frozen_names:
+            param = submodule._parameters.pop(name)
+            submodule.register_buffer(name, param.detach())
 
 
 def action_nft_loss(
@@ -146,8 +220,6 @@ def action_nft_loss(
 class OpenWAMNFTPolicy(nn.Module):
     """Register the actual architecture once and replay its action predictions."""
 
-    _no_split_modules: ClassVar[list[str]] = ["OpenWAMNFTPolicy"]
-
     def __init__(self, architecture, num_steps, valid_dims):
         super().__init__()
         self.architecture = architecture
@@ -168,6 +240,18 @@ class OpenWAMNFTPolicy(nn.Module):
                     raise ValueError(
                         "Joint backbone was no_grad-wrapped; freeze weights without disabling autograd."
                     )
+        present = {type(module).__name__ for module in self.modules()}
+        blocks = [name for name in _FSDP_BLOCK_NAMES if name in present]
+        # Tiny stand-ins have no Wan blocks. The released checkpoint does.
+        self._no_split_modules = blocks or ["OpenWAMNFTPolicy"]
+        _frozen_parameters_to_buffers(self.architecture)
+        param_bytes = sum(p.numel() * p.element_size() for p in self.parameters())
+        buffer_bytes = sum(b.numel() * b.element_size() for b in self.buffers())
+        print(
+            f"[OpenWAM] nft trainable={param_bytes / 2**30:.2f} GiB "
+            f"frozen_buffers={buffer_bytes / 2**30:.2f} GiB",
+            flush=True,
+        )
 
     def train(self, mode=True):
         super().train(mode)
@@ -188,6 +272,7 @@ class OpenWAMNFTPolicy(nn.Module):
                 backbone._dtype = param.dtype
 
     def forward(self, replay):
+        restore_replay_pipeline(replay)
         self.sync_runtime()
         param = next(self.architecture.action_backbone.parameters())
         rows = replay["nft_metadata"].detach().cpu()

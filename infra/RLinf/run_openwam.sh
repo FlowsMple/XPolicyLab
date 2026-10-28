@@ -12,7 +12,14 @@ export REPO_PATH="${RLINF_PATH}"
 export EMBODIED_PATH="${RLINF_PATH}/examples/embodiment"
 export RLINF_EXT_MODULE=XPolicyLab.infra.RLinf.register
 export ROBOT_PLATFORM=ALOHA
-export PYTHONPATH="${ROBOTWIN_RUNTIME_PATH}:${XPL_ROOT}/..:${RLINF_PATH}${PYTHONPATH:+:${PYTHONPATH}}"
+# The simulator checkout is first so its `envs` package wins over the parent
+# workspace. That checkout may also vendor an older XPolicyLab, which would
+# hide this one. A directory that contains only this checkout's package goes
+# ahead of the simulator tree.
+XPL_IMPORT_SHIM="${XPL_ROOT}/.import_shim"
+mkdir -p "${XPL_IMPORT_SHIM}"
+ln -sfn "${XPL_ROOT}" "${XPL_IMPORT_SHIM}/XPolicyLab"
+export PYTHONPATH="${XPL_IMPORT_SHIM}:${ROBOTWIN_RUNTIME_PATH}:${XPL_ROOT}/..:${RLINF_PATH}${PYTHONPATH:+:${PYTHONPATH}}"
 MODE="${1:?usage: run_openwam.sh train|eval [Hydra overrides]}"
 shift
 case "$MODE" in
@@ -24,5 +31,7 @@ esac
 if [[ " $* " != *" --cfg "* ]] && ! ray status >/dev/null 2>&1; then
   ray start --head --port="${RAY_PORT:-6379}" --disable-usage-stats
 fi
-cd "${ROBOTWIN_RUNTIME_PATH}"
+# Ray workers put the driver cwd on sys.path ahead of PYTHONPATH. The simulator
+# checkout vendors an older XPolicyLab, so the process must not start there.
+cd "${XPL_ROOT}"
 python "${SCRIPT_DIR}/${ENTRY}" --config-name "$CONFIG" "$@"

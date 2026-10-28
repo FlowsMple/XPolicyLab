@@ -494,7 +494,7 @@ class Model(ModelTemplate):
 
         from XPolicyLab.utils.process_data import pack_robot_state
 
-        from .rl import JointReplay
+        from .rl import JointReplay, flatten_replay_for_transport
 
         if self.benchmark != "robotwin" or not hasattr(self, "policy"):
             raise NotImplementedError("NFT is only implemented for RoboTwin EEF.")
@@ -502,9 +502,13 @@ class Model(ModelTemplate):
             raise ValueError(f"Unknown rollout mode: {mode}")
         self.policy.sync_runtime()
         conditions = [self._conditions(self._encode_obs(obs)) for obs in obs_list]
-        seeds = torch.randint(0, 2**31 - 1, (len(conditions),)) if mode == "train" else [int(self.model_cfg.get("seed", 42))] * len(conditions)
-        for condition, seed in zip(conditions, seeds):
-            condition["seed"] = int(seed)
+        # generate_batch denoises the whole batch with one noise seed.
+        if mode == "train":
+            seed = int(torch.randint(0, 2**31 - 1, ()).item())
+        else:
+            seed = int(self.model_cfg.get("seed", 42))
+        for condition in conditions:
+            condition["seed"] = seed
         selected_step = kwargs.get("nft_step_index")
         if selected_step is None:
             selected_step = int(torch.randint(self.policy.num_steps, ()).item())
@@ -521,7 +525,7 @@ class Model(ModelTemplate):
         data = replay.data
         data["nft_sigma"] = data["nft_action_t"].float() / float(self.policy.architecture.action_scheduler.num_train_timesteps)
         data["nft_valid_dims"] = self.policy.valid_dims.detach().cpu()[None].expand(len(conditions), -1).clone()
-        return actions, {"forward_inputs": data}
+        return actions, {"forward_inputs": flatten_replay_for_transport(data)}
 
     def nft_forward(self, forward_inputs, **kwargs):
         return self.policy(forward_inputs)

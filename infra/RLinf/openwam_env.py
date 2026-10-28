@@ -12,6 +12,18 @@ from rlinf.workers.env.env_worker import EnvWorker
 from XPolicyLab.policy.OpenWAM.robotwin import native_obs_to_packed, packed_to_native
 
 
+def is_recoverable_ee_execution_failure(exc):
+    """Planner failures that happen before either arm moves.
+
+    mplib TOPP raises RuntimeError after a path exists. The EE branch of
+    take_action also divides by a 0-length successful plan on the first
+    control iteration, before set_arm_joints or scene.step.
+    """
+    if isinstance(exc, RuntimeError) and "Fail to parameterize path" in str(exc):
+        return True
+    return isinstance(exc, ZeroDivisionError)
+
+
 def build_ee_vector_env(task_config, num_envs, seeds, quaternion_order):
     # Loaded only in simulator workers. Uses RoboTwin's RLinf_support branch.
     from robotwin.envs import vector_env as native
@@ -46,9 +58,22 @@ def build_ee_vector_env(task_config, num_envs, seeds, quaternion_order):
                 self.reset(env_seed=None)
             with self.lock:
                 before = self.task.take_action_cnt
-                self.task.take_action(
-                    packed_to_native(actions[0], quaternion_order), action_type="ee"
-                )
+                planner_failure = False
+                try:
+                    self.task.take_action(
+                        packed_to_native(actions[0], quaternion_order),
+                        action_type="ee",
+                    )
+                except Exception as exc:
+                    if not is_recoverable_ee_execution_failure(exc):
+                        raise
+                    # take_action already counted this step and wrote the video
+                    # frame. The failure is before either arm moves.
+                    planner_failure = True
+                    print(
+                        f"EE plan failed ({type(exc).__name__}: {exc}); holding both arms for this step",
+                        flush=True,
+                    )
                 executed = self.task.take_action_cnt - before
                 success = bool(self.task.eval_success or self.task.check_success())
                 truncated = (
@@ -59,7 +84,11 @@ def build_ee_vector_env(task_config, num_envs, seeds, quaternion_order):
                     "reward": float(success),
                     "terminated": success,
                     "truncated": truncated,
-                    "info": {"success": success, "executed_action_count": executed},
+                    "info": {
+                        "success": success,
+                        "executed_action_count": executed,
+                        "planner_failure": planner_failure,
+                    },
                 }
 
         def step_with_full_obs(self, actions):

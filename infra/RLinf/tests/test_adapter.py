@@ -392,3 +392,16 @@ def test_pack_action_steps_dual_arm_joint():
     assert packed.shape == (1, 2, 14)
     np.testing.assert_allclose(packed[0, 0, :6], np.arange(6))
     np.testing.assert_allclose(packed[0, 0, 6:7], [0.5])
+
+
+def test_recoverable_ee_execution_failure_is_specific():
+    from XPolicyLab.infra.RLinf.openwam_env import is_recoverable_ee_execution_failure
+
+    assert is_recoverable_ee_execution_failure(
+        RuntimeError("Fail to parameterize path")
+    )
+    assert is_recoverable_ee_execution_failure(ZeroDivisionError())
+    assert not is_recoverable_ee_execution_failure(RuntimeError("IK failed"))
+    assert not is_recoverable_ee_execution_failure(
+        ValueError("Fail to parameterize path")
+    )

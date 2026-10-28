@@ -6,7 +6,14 @@ import numpy as np
 import pytest
 import torch
 from torch import nn
-from XPolicyLab.policy.OpenWAM.rl import JointReplay, OpenWAMNFTPolicy, action_nft_loss
+from XPolicyLab.policy.OpenWAM.rl import (
+    JointReplay,
+    OpenWAMNFTPolicy,
+    action_nft_loss,
+    flatten_replay_for_transport,
+    restore_replay_pipeline,
+)
+from XPolicyLab.policy.OpenWAM import robotwin as robotwin_bridge
 from XPolicyLab.policy.OpenWAM.robotwin import (
     eef20_to_steps,
     native_obs_to_packed,
@@ -119,6 +126,41 @@ def test_replay_is_immutable_and_serializable():
         JointReplay(2).finish(torch.ones(1))
 
 
+def test_flattened_replay_batches_on_the_trajectory_batch_axis():
+    from rlinf.data.schema.embodied_types import Trajectory
+
+    data = captured_replay()
+    flat = flatten_replay_for_transport(data)
+    assert "nft_pipeline" in data
+    assert all(torch.is_tensor(value) for value in flat.values())
+    stacked = {key: value.unsqueeze(0) for key, value in flat.items()}
+    halves = [
+        Trajectory(forward_inputs={key: value[:, index : index + 1] for key, value in stacked.items()})
+        for index in range(2)
+    ]
+    with pytest.raises(TypeError):
+        Trajectory.to_batch(
+            [
+                Trajectory(
+                    forward_inputs={
+                        key: (value.unsqueeze(0) if torch.is_tensor(value) else value)
+                        for key, value in data.items()
+                    }
+                )
+            ]
+        )
+    batched = Trajectory.to_batch(halves)["forward_inputs"]
+    assert batched["nft_pipe.latents"].shape[:2] == (1, 2)
+    merged = {key: value.reshape(-1, *value.shape[2:]) for key, value in batched.items()}
+    restore_replay_pipeline(merged)
+    policy = OpenWAMNFTPolicy(TinyJointArchitecture(), 10, [1, 1, 0, 0])
+    output = policy(merged)["v_theta"]
+    assert output.shape[0] == 2
+    assert "nft_pipeline" in merged
+    direct = flatten_replay_for_transport(captured_replay())
+    torch.testing.assert_close(policy(direct)["v_theta"], policy(captured_replay())["v_theta"])
+
+
 class TinyJointArchitecture(nn.Module):
     """Small coupled model: gradients must pass through frozen video weights."""
 
@@ -142,11 +184,35 @@ def test_replay_gradient_reaches_only_action_weights_and_roundtrip():
     output = policy(data)["v_theta"]
     output.square().mean().backward()
     assert not architecture.training
+    assert isinstance(architecture.action_backbone.weight, nn.Parameter)
+    assert not isinstance(architecture.video.weight, nn.Parameter)
     assert architecture.action_backbone.weight.grad.abs().sum() > 0
     assert architecture.video.weight.grad is None
     restored = OpenWAMNFTPolicy(TinyJointArchitecture(), 10, [1, 1, 0, 0])
     restored.load_state_dict(policy.state_dict(), strict=True)
     torch.testing.assert_close(restored(data)["v_theta"], output)
+
+
+def test_fsdp_units_follow_real_blocks_not_the_whole_policy():
+    class DiTBlock(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.proj = nn.Linear(2, 2)
+
+    class Architecture(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.action_backbone = nn.Linear(2, 2)
+            self.block = DiTBlock()
+
+        @property
+        def backbones(self):
+            return {}
+
+    policy = OpenWAMNFTPolicy(Architecture(), 1, [1, 0])
+    assert policy._no_split_modules == ["DiTBlock"]
+    tiny = OpenWAMNFTPolicy(TinyJointArchitecture(), 1, [1, 0])
+    assert tiny._no_split_modules == ["OpenWAMNFTPolicy"]
 
 
 def test_mixed_metadata_rejected():
@@ -170,6 +236,22 @@ def test_rotated_pose_roundtrip_and_native_boundary(native_order):
     }
     step = eef20_to_steps(state_to_eef20(state)[None])[0]
     np.testing.assert_allclose(step["left_ee_pose"], pose, atol=1e-6)
+    official = robotwin_bridge.conversion.robotwin_endpose_to_eef20d(pose, pose, [0.2], [0.8])
+    np.testing.assert_allclose(state_to_eef20(state), official, atol=1e-6)
+    executed = packed_to_native(
+        np.concatenate(
+            [
+                step["left_ee_pose"],
+                np.asarray(step["left_ee_joint_state"]).reshape(1),
+                step["right_ee_pose"],
+                np.asarray(step["right_ee_joint_state"]).reshape(1),
+            ]
+        ),
+        "wxyz",
+    )
+    np.testing.assert_allclose(
+        executed, robotwin_bridge.conversion.eef20d_to_ee16d(official), atol=1e-5
+    )
     raw_pose = pose_order(pose, "wxyz", native_order)
     raw = {
         "endpose": {

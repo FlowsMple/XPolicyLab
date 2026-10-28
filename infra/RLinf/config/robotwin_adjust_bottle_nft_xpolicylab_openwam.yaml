@@ -186,7 +186,9 @@ actor:
     mixed_precision:
       param_dtype: ${actor.model.precision}
       reduce_dtype: ${actor.model.precision}
-      buffer_dtype: ${actor.model.precision}
+      # Frozen video weights are buffers. A buffer dtype makes FSDP clone
+      # them on GPU while building the rollout state dict.
+      buffer_dtype: null
 
 reward:
   use_reward_model: False

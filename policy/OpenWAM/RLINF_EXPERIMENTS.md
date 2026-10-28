@@ -1,6 +1,6 @@
 # OpenWAM → RLinf 首轮实验手册
 
-更新：2026-10-23。状态：**实验代码已实现，CPU 契约测试通过；真实 OpenWAM 权重、GPU/FSDP、RoboTwin 仿真和学习效果尚未验证。** 本文中的服务器命令是待执行实验步骤，不是已完成实验记录。
+更新：2026-10-23。状态：**A–E 已在本机 8×L20 上跑完。** 16 步 smoke 和两次 200 步评估的成功数都是 0/2，组内优势全为零，不能说明策略学会了任务。F 的第一组对照（`nft_learning_seed1234`，每轮 200 步、20 轮、`actor.seed=1234`）已启动，结果还没出来。实测记录见第 7 节。
 
 对应代码基线：XPolicyLab `b2594786` 加本次修改，RLinf 子模块 `0067f7d5ce525c18bda439ed8dbb638abafd6a06`。请一起传输本次新增文件；仅 `git diff` 不包含未跟踪文件。不要先升级 RLinf 子模块或替换内置 OpenWAM。
 
@@ -143,6 +143,8 @@ export ROBOTWIN_QUATERNION_ORDER=wxyz
 ```
 
 必须用一个**非单位旋转**样本对比原生客户端与适配器：观察 EEF20 的旋转列、位置单位、左右臂次序、夹爪开闭含义，执行后检查机器人朝向。round-trip 单测只能证明转换互逆，不能证明 checkpoint 训练时的约定正确。若训练数据本身按另一种顺序解释了四元数，需要按真实数据建立显式兼容变换；不能只切换上述 runtime 参数掩盖错误。
+
+2026-10-23 在本机 `RLinf_support` `0008ae68` 上核对过：观测 `_trans_endpose` 和 `take_action(action_type="ee")` 都使用 transforms3d，四元数是 wxyz。官方 RoboTwin 客户端和 dataloader 把这 4 个原始分量直接送进 `quat_xyzw_to_rot6d`，不再换序。适配器按同一约定透传。因此本机设置 `ROBOTWIN_QUATERNION_ORDER=wxyz`。同一组非单位旋转上，透传后的 EEF20 与官方客户端一致；若先把 wxyz 换成 xyzw 再进 helper，rot6d 最大绝对差约为 1.5。
 
 ## 4. 依次执行实验
 
@@ -302,4 +304,49 @@ F 训练设置、种子、训练前后成功率、GPU 小时：
 - `infra/RLinf/tests/test_adapter.py -k 'not abot'`：20 个检查通过，含新增 NFT 能力门禁/梯度和已有 PPO/GRPO/eval 桥接检查。
 - 尝试完整 suite 时，Abot 相关用例因本机未安装其 Transformers 模型依赖失败；未将该结果记为通过，也未修改无关 Abot 实现。
 - 两个 Hydra 配置的 compose / resolve 通过。Python 编译、启动脚本语法及新增模块静态检查见本次交付说明。
-- **未运行**：真实 checkpoint、原生服务/调试客户端、SAPIEN、CUDA、FSDP、Ray 集群训练、权重同步、真实存档恢复或成功率实验。CPU 测试不覆盖这些系统边界。
+- **未运行**：真实 checkpoint、原生服务/调试客户端、SAPIEN、CUDA、FSDP、Ray 集群训练、权重同步、真实存档恢复或成功率实验。CPU 测试不覆盖这些系统边界。上面是当时 macOS CPU 环境的记录；本机 GPU 结果见第 7 节。
+
+## 7. 本机服务器记录（2026-10-23）
+
+```text
+实验编号 / 日期：openwam_nft_round1 / 2026-10-23
+XPolicyLab SHA + 修改包 / RLinf SHA / RoboTwin SHA：
+  XPolicyLab 3f2b0d5b 加未提交修改；RLinf 0067f7d5；RoboTwin runtime 0008ae68（RLinf_support）
+checkpoint 名称 / config hash / 数据机器人与动作约定：
+  OpenWAM-Alpha-Sim-RoboTwin-Full；probe config_sha256 d69c342a2d7e67dbb44058b20bfd0b0e986e8885b9462f7c7e85f8658fb822b0
+  aloha-agilex，EEF20 → EE16，action_type=ee，replan_steps=1
+GPU 型号、数量、显存 / driver / CUDA / Python / Torch：
+  8× NVIDIA L20 46068 MiB，本实验用 GPU0=actor、GPU1=env/rollout；driver 570.195.03；CUDA 12.8；Python 3.11.14；Torch 2.11.0+cu128
+四元数顺序的代码依据：
+  仿真与官方客户端都是 transforms3d wxyz，适配层原样传递，ROBOTWIN_QUATERNION_ORDER=wxyz
+A CPU 测试、配置展开：
+  policy/OpenWAM/tests/test_rl.py 通过（含轨迹 to_batch 摊平往返）。分卡配置可 resolve。
+B 真实观测 probe：batch/microbatch 误差、gradient_norm、峰值显存、耗时：
+  整批重放最大误差 0。microbatch 最大绝对误差 0.0224609375（2/5120，默认 atol 0.02 未过）。
+  以 atol=rtol=0.03 重跑：status=passed，replay_pass，backward_pass，gradient_norm=13.62，峰值 28.65 GiB，78.6 s。
+  优势是人为非零值，没有 optimizer step，也没有 FSDP。
+C baseline：成功数/总 episode、异常动作/视频：
+  2 个环境、200 步，exit 0。success_once=0，success_at_end=0，return=0。
+  规划失败被记为保持，没有中断评估。代表性帧在 video_frames/frame_1.png … frame_5.png。
+D smoke：是否保存、loss/grad_norm、非零优势比例、NaN、GPU/CPU 峰值：
+  exit 0。保存 global_step_1 与 global_step_2（dcp_checkpoint 与 full_weights.pt）。
+  两轮 rewards=0，success_once=0，zero_adv_fraction=1。
+  第 1 轮 nft_loss=0.393，grad_norm=1.960，replay_v_mse=8.79e-06，clip_frac=0。
+  第 2 轮 nft_loss=0.359，grad_norm=1.796，replay_v_mse=7.54e-06，clip_frac=0。
+  无 NaN/Inf。actor 约 29 GiB，rollout+仿真约 28 GiB。
+  零优势下 grad_norm 不为 0，对应重放不是逐位 on-policy（mse 约 1e-5），不是奖励学习。
+E 恢复与权重加载：
+  用 global_step_2/actor/model_state_dict/full_weights.pt 做独立评估，exit 0。
+  2 个环境、200 步，success_once=0，success_at_end=0。视频写到 video/eval/seed_0/0.mp4（与 baseline 同一路径，文件时间是这次评估）。
+  从 global_step_2 恢复，max_epochs=3，只再跑了一步并保存 nft_resume/checkpoints/global_step_3。exit 0。
+  该步仍是 zero_adv_fraction=1，nft_loss=0.266，grad_norm=2.423，replay_v_mse=8.92e-06。
+F 训练设置、种子、训练前后成功率、GPU 小时：
+  nft_learning_seed1234 已于 2026-10-23 13:59 UTC 结束，exit 0，墙钟 4 小时 20 分。GPU0=actor，GPU1=env+rollout。
+  训练采样 success_once 每轮 2 条：1,1,0,0,0,1,2,1,1,1,0,1,0,1,0,1,1,1,1,1，合计 15/40。第 1 轮是更新前的原权重。
+  日志：/personal/zijian/rlinf/experiments/openwam_nft_round1/learning.log
+  2026-10-26 用后四张卡重训同一预算：配置 robotwin_adjust_bottle_nft_xpolicylab_openwam_last4，actor=GPU4，rollout=GPU5-6，env=GPU7。实验名 nft_learning_seed1234_last4。
+  20 轮不保证收敛；评估种子上的 0/2 与训练采样不是同一组场景。
+第一个失败阶段与完整 traceback（不要只截最后一行）：
+  A–E 最终都 exit 0。中途失败已绕开且不再复现：轨迹 forward_inputs 里的 nft_pipeline 字典无法被 Trajectory.to_batch 按 batch 维拼接。
+  现改为顶层 nft_pipe.* 张量，训练前再组回字典。RLinf 核心未改。
+```
