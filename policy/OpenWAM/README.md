@@ -6,7 +6,7 @@
 
 Shared conventions — argument meanings, checkpoint naming, split-machine deployment, `EVAL_ENV_TYPE` — are documented in the [XPolicyLab README](../../README.md). Official results: [RoboDojo LeaderBoard](https://robodojo-benchmark.com/LeaderBoard).
 
-An experimental **RoboTwin EEF → RLinf NFT** path is available separately. See [RLinf experiment guide](RLINF_EXPERIMENTS.md) for server setup, replay/gradient probes, baseline evaluation, training, checkpoint recovery, and reporting. It has CPU contract tests only; GPU training and learning quality remain unverified. The RoboDojo commands below retain their existing role.
+OpenWAM can train with RLinf NFT under **RoboDojo** (`stack_bowls`, `arx_x5`, Luminis) or **RoboTwin** (`adjust_bottle`, `aloha_agilex`). Both use the same NFT actor and loss. Select the simulator configuration and its matching EEF checkpoint, including normalization statistics. Both have completed real rollouts and saved actor updates. See the [L20-3 launch and output guide (中文)](../../infra/RLinf/doc/OPENWAM_QUICKSTART_zh.md), the [setup for either simulator](../../infra/RLinf/doc/GUIDE.md#openwam-nft-on-either-simulator) and the [training results](../../infra/RLinf/doc/TRAINING_RESULTS.md).
 
 ## Installation
 

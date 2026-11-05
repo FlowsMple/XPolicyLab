@@ -14,11 +14,11 @@ bash install.sh
 source openpi/.venv/bin/activate  # OpenPI is uv-managed; there is no policy conda env
 ```
 
-`bash install.sh` does not install the RLinf runtime. After the eval install, activate `openpi/.venv` and run the runtime script yourself. It keeps torch 2.10 and jax 0.5.3.
+`bash install.sh` does not install the RLinf runtime. RLinf v0.4 targets torch 2.11. Activate a separate RL policy environment with the same OpenPI transform/tokenizer dependencies, preserving `openpi/.venv` for the original workflow. The script preserves existing torch unless `--upgrade-torch` is passed.
 
 ```bash
-source openpi/.venv/bin/activate
-bash ../../infra/RLinf/install_rl_runtime.sh
+source /absolute/path/to/separate-rl-policy-env/bin/activate
+bash ../../infra/RLinf/scripts/install_rl_runtime.sh --upgrade-torch
 ```
 
 `eval.sh` arg 9 is not a conda env: pass `uv` (uses `deploy.yml` `policy_uv_env_path`) or an explicit OpenPI project path.
@@ -39,6 +39,11 @@ bash process_data.sh RoboDojo stack_bowls_50ep arx_x5 joint 50 stack_bowls
 ```
 
 ## Training
+
+`train.sh` below preserves the official OpenPI/JAX flow. The separate
+[`train_pi05_sft.sh` workflow](../../infra/RLinf/doc/PI05_SFT.md) adds full SFT with RLinf v0.4's native
+PyTorch Pi05, CPU normalization/config checks, and SFT-to-RL checkpoint loading.
+Use a separate environment; its outputs live under `checkpoints/pytorch_sft/`.
 
 ```bash
 cd XPolicyLab/policy/Pi_05
@@ -78,3 +83,11 @@ Environment variables used by the adapter scripts:
 | `OPENPI_LOCAL_CACHE_ROOT` | Per-host local cache root for the HF datasets / JAX compilation caches; defaults to `/tmp/openpi-cache-$(hostname)`. |
 
 `OPENPI_ROOT` and `OPENPI_SRC` are additional overrides consumed by the local scripts.
+
+## RLinf v0.4 backend
+
+For PPO or GRPO on RoboDojo and RoboTwin, see the [two-GPU training and resume guide (中文)](../../infra/RLinf/doc/PI05_ABOT_QUICKSTART_zh.md).
+
+Pi0.5 PPO and GRPO use RLinf’s native PyTorch `Pi0RL` with the XPolicyLab task transforms. Both algorithms completed real RoboTwin `adjust_bottle` rollouts and resumed training from a DCP checkpoint in a new process. The guide includes the two-GPU launch, checkpoint layout and resume command. [Train and resume](../../infra/RLinf/doc/GUIDE.md#robotwin-adjust_bottle-training-and-resume) · [Run evidence](../../infra/RLinf/doc/OPENPI_TRAINING.md#robotwin-adjust_bottle-真实仿真与断点恢复)
+
+For standalone evaluation of RL weights, select `rl_backend: rlinf_v0_4` and supply model weights and matching normalization statistics. For supervised training, follow the [native PyTorch SFT workflow](../../infra/RLinf/doc/PI05_SFT.md).

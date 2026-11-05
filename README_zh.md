@@ -77,7 +77,7 @@ XPolicyLab 与具体 benchmark 解耦：任意 benchmark、仿真器或真机方
 
 **基础设施**
 
-- **[RLinf](https://github.com/RLinf/RLinf)** *（即将支持）*：策略开发与部署工作流的基础设施目标。
+- **RLinf 0.4.0** 在 RoboDojo 和 RoboTwin 上提供 OpenWAM NFT、Pi0.5 和 Abot 的 PPO/GRPO 配置。[OpenWAM 启动与输出](infra/RLinf/doc/OPENWAM_QUICKSTART_zh.md) · [Pi0.5 与 Abot 训练和恢复](infra/RLinf/doc/PI05_ABOT_QUICKSTART_zh.md)
 - **StarVLA**：基础设施与策略栈；见 [policy/StarVLA](policy/StarVLA/README.md)。
 
 
@@ -534,21 +534,17 @@ python scripts/transform_lerobot_v21_format.py "<bench_name>.*.*" \
 
 ## 在 RoboTwin 上做 RL 训练
 
-`infra/RLinf/` 用上游 RLinf 训练 XPolicyLab 策略。RLinf 检出是子模块 `infra/RLinf/RLinf`，本身不修改。在包含该 XPolicyLab 子模块的 RoboTwin 检出中：
+Pi0.5 的 PPO 和 GRPO 均已在真实 `adjust_bottle` 仿真中完成 rollout、actor 更新和新进程断点恢复。激活 Pi0.5 的 RL 环境后，在 RoboTwin 根目录运行以下命令即可检查 PPO 配置，无需启动 Ray。[Pi0.5 安装说明](policy/Pi_05/README.md#installation)
 
 ```bash
-git submodule update --init --recursive
-cd policy/<POLICY>
-bash install.sh
-# 激活该策略环境
-bash ../../infra/RLinf/install_rl_runtime.sh
-cd ../..
-export ROBOTWIN_ASSETS_PATH=/path/to/robotwin_assets
-export POLICY_MODEL_PATH=/path/to/policy_checkpoint
-bash XPolicyLab/infra/RLinf/run.sh robotwin_adjust_bottle_grpo_xpolicylab_pi05
+cd XPolicyLab
+git submodule update --init infra/RLinf/RLinf
+export ROBOTWIN_ASSETS_PATH=/path/to/root-containing-assets
+export POLICY_MODEL_PATH=/path/to/pi05-pytorch-checkpoint
+bash infra/RLinf/scripts/run.sh robotwin_adjust_bottle_ppo_xpolicylab_pi05 --cfg job --resolve
 ```
 
-`bash install.sh` 不安装 RLinf 运行时。评测环境装好后，激活该策略环境，再单独跑 `bash infra/RLinf/install_rl_runtime.sh`（Abot 的 RL 还要加 `--upgrade-torch`）。`adjust_bottle` 配置覆盖 Pi_05 GRPO 与 Abot_M0 PPO，以及对应的 eval 配置。这些配置开启 eval 视频。训练视频保持关闭。启动前设置 `ROBOTWIN_ASSETS_PATH` 和 `POLICY_MODEL_PATH`。日志与 checkpoint 写到 `infra/RLinf/results`（按 `RLINF_PATH` 解析，不在 RoboTwin 检出根目录）。
+`Pi_05` 和 `Abot_M0` 均提供 `adjust_bottle` 的 PPO、GRPO 和评估配置。Pi0.5 双卡实测流程给出了显卡分配、保存第 1 步以及从存档续训到第 2 步的命令。[启动与恢复](infra/RLinf/doc/GUIDE.md#robotwin-adjust_bottle-training-and-resume) · [实验证据](infra/RLinf/doc/OPENPI_TRAINING.md#robotwin-adjust_bottle-真实仿真与断点恢复) · [策略和仿真环境扩展指南](infra/RLinf/doc/EXTENSIONS.md)
 
 adapter 填空样例是 [policy/demo_policy](policy/demo_policy/README.md#rl-training)。在 `rl.py` 里实现 `_sample_policy` 和 `_log_prob_value`，把可训练的 `nn.Module` 放到 `self.model` 或 `self.policy`，log-prob 真实可用后再把 `"ppo"` 或 `"grpo"` 加进 `RL_MODES`。`required_mode: eval` 仍使用 `get_action_batch`。
 

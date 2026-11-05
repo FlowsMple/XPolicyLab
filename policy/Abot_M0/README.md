@@ -6,6 +6,8 @@
 
 Shared conventions — argument meanings, checkpoint naming, split-machine deployment, `EVAL_ENV_TYPE` — are documented in the [XPolicyLab README](../../README.md). Official results: [RoboDojo LeaderBoard](https://robodojo-benchmark.com/LeaderBoard).
 
+For PPO or GRPO on RoboDojo and RoboTwin, see the [two-GPU training and resume guide (中文)](../../infra/RLinf/doc/PI05_ABOT_QUICKSTART_zh.md).
+
 ## Installation
 
 Read `INSTALLATION.md` before first use — it covers setup that `install.sh` cannot fully express (external checkpoints, system packages, manual fallback steps, multi-environment runtime notes):
@@ -20,8 +22,10 @@ conda activate <policy_env>  # e.g. ABot (install.sh env name; override with ABO
 
 ```bash
 conda activate <policy_env>
-bash ../../infra/RLinf/install_rl_runtime.sh --upgrade-torch
+bash ../../infra/RLinf/scripts/install_rl_runtime.sh --upgrade-torch
 ```
+
+The RLinf 0.4 PPO smoke test uses the RoboTwin `adjust_bottle` joint-action checkpoint. The run report includes the rollout outcomes and a direct comparison of the saved action decoder with its initial weights. See the [RLinf training results](../../infra/RLinf/doc/TRAINING_RESULTS.md#2026-11-04-abot-与-openwam-验证).
 
 ## Data Processing
 

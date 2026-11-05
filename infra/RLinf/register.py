@@ -1,22 +1,13 @@
-"""Register the XPolicyLab embodied adapter with RLinf."""
+"""RLINF_EXT_MODULE entry point, executed in the driver and each Ray worker."""
 
-from __future__ import annotations
+from .core.extensions import policy_extensions, simulator_extensions
 
 
-def register() -> None:
-    """Register ``model_type: xpolicylab`` in this process."""
-    from omegaconf import DictConfig
-
+def register():
     from rlinf.models import register_model
+    from .core.factory import get_model
 
-    def _build_xpolicylab(cfg: DictConfig, torch_dtype):
-        from XPolicyLab.infra.RLinf import get_model
-
-        return get_model(cfg, torch_dtype)
-
-    register_model(
-        "xpolicylab",
-        _build_xpolicylab,
-        category="embodied",
-        force=True,
-    )
+    register_model("xpolicylab", get_model, category="embodied", force=True)
+    for extension in (*policy_extensions().values(), *simulator_extensions().values()):
+        if hasattr(extension, "register"):
+            extension.register()

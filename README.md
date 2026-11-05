@@ -75,7 +75,7 @@ XPolicyLab is benchmark-agnostic: any benchmark, simulator, or real-robot setup 
 
 **Infrastructure**
 
-- **[RLinf](https://github.com/RLinf/RLinf)** *(coming soon)*: infrastructure target for policy development and deployment workflows.
+- **RLinf 0.4.0** provides OpenWAM NFT and Pi0.5/Abot PPO and GRPO configurations for RoboDojo and RoboTwin. [OpenWAM launch and outputs (中文)](infra/RLinf/doc/OPENWAM_QUICKSTART_zh.md) · [Pi0.5 and Abot training and resume (中文)](infra/RLinf/doc/PI05_ABOT_QUICKSTART_zh.md)
 - **StarVLA**: infrastructure and policy stack; see [policy/StarVLA](policy/StarVLA/README.md).
 
 
@@ -531,21 +531,17 @@ The paste-in checklist for agents that load none of these is in [CONTRIBUTING.md
 
 ## RL training on RoboTwin
 
-`infra/RLinf/` trains XPolicyLab policies with upstream RLinf. The RLinf checkout is the submodule `infra/RLinf/RLinf` and is not modified. From a RoboTwin checkout that contains this XPolicyLab submodule:
+Pi0.5 PPO and GRPO have both completed real `adjust_bottle` rollouts, actor updates and checkpoint resume in a fresh process. From the RoboTwin root with the Pi0.5 RL environment active, inspect the PPO configuration without starting Ray. [Pi0.5 installation](policy/Pi_05/README.md#installation)
 
 ```bash
-git submodule update --init --recursive
-cd policy/<POLICY>
-bash install.sh
-# activate the policy env from that install
-bash ../../infra/RLinf/install_rl_runtime.sh
-cd ../..
-export ROBOTWIN_ASSETS_PATH=/path/to/robotwin_assets
-export POLICY_MODEL_PATH=/path/to/policy_checkpoint
-bash XPolicyLab/infra/RLinf/run.sh robotwin_adjust_bottle_grpo_xpolicylab_pi05
+cd XPolicyLab
+git submodule update --init infra/RLinf/RLinf
+export ROBOTWIN_ASSETS_PATH=/path/to/root-containing-assets
+export POLICY_MODEL_PATH=/path/to/pi05-pytorch-checkpoint
+bash infra/RLinf/scripts/run.sh robotwin_adjust_bottle_ppo_xpolicylab_pi05 --cfg job --resolve
 ```
 
-`bash install.sh` does not install the RLinf runtime. After that eval install, activate the policy env and run `bash infra/RLinf/install_rl_runtime.sh` (Abot RL also needs `--upgrade-torch`). `adjust_bottle` configs cover Pi_05 GRPO and Abot_M0 PPO, plus matching eval configs. Eval video is enabled in those configs. Training video stays off. Set `ROBOTWIN_ASSETS_PATH` and `POLICY_MODEL_PATH` before launch. Logs and checkpoints go under `infra/RLinf/results` (resolved from `RLINF_PATH`, not the RoboTwin checkout root).
+The `adjust_bottle` configs include PPO, GRPO and evaluation for both `Pi_05` and `Abot_M0`. For the verified Pi0.5 two-GPU run, follow the guide to select GPUs, save step 1 and resume to step 2. [Launch and resume](infra/RLinf/doc/GUIDE.md#robotwin-adjust_bottle-training-and-resume) · [Run evidence](infra/RLinf/doc/OPENPI_TRAINING.md#robotwin-adjust_bottle-真实仿真与断点恢复) · [Policy and simulator extension guide](infra/RLinf/doc/EXTENSIONS.md)
 
 The adapter fill-in is [policy/demo_policy](policy/demo_policy/README.md#rl-training). Implement `_sample_policy` and `_log_prob_value` in `rl.py`, put the trainable `nn.Module` on `self.model` or `self.policy`, and add `"ppo"` or `"grpo"` to `RL_MODES` once those log-probs are real. `required_mode: eval` keeps using `get_action_batch`.
 

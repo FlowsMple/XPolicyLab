@@ -21,15 +21,15 @@ import torch.nn as nn
 
 from XPolicyLab.model_template import ModelTemplate  # noqa: E402
 
-from XPolicyLab.infra.RLinf.action_model import (  # noqa: E402
+from XPolicyLab.infra.RLinf.core.action_model import (  # noqa: E402
     XPolicyLabForRLActionPrediction,
 )
-from XPolicyLab.infra.RLinf.capabilities import (  # noqa: E402
+from XPolicyLab.infra.RLinf.core.capabilities import (  # noqa: E402
     get_declared_rl_modes,
     infer_required_rl_mode,
     require_rl_mode,
 )
-from XPolicyLab.infra.RLinf.obs import (  # noqa: E402
+from XPolicyLab.infra.RLinf.core.obs import (  # noqa: E402
     env_obs_to_xpolicy_obs_list,
     pack_action_steps,
 )
@@ -395,7 +395,7 @@ def test_pack_action_steps_dual_arm_joint():
 
 
 def test_recoverable_ee_execution_failure_is_specific():
-    from XPolicyLab.infra.RLinf.openwam_env import is_recoverable_ee_execution_failure
+    from XPolicyLab.policy.OpenWAM.rlinf.robotwin_env import is_recoverable_ee_execution_failure
 
     assert is_recoverable_ee_execution_failure(
         RuntimeError("Fail to parameterize path")

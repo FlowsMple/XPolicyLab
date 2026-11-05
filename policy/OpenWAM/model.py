@@ -195,8 +195,8 @@ class Model(ModelTemplate):
         self.action_type = action_type
         self.robot_action_dim_info = dim_info
         if "nft" in self.get_rl_modes():
-            if self.benchmark != "robotwin" or not self.model_cfg.get("experimental_nft", False):
-                raise ValueError("NFT requires RoboTwin and explicit experimental_nft=true.")
+            if not self.model_cfg.get("experimental_nft", False):
+                raise ValueError("NFT requires explicit experimental_nft=true.")
         if list(dim_info.get("arm_dim") or []) != _EXPECTED_ARM_DIMS or list(dim_info.get("ee_dim") or []) != _EXPECTED_EE_DIMS:
             raise ValueError(
                 "OpenWAM's RoboDojo checkpoint is dual-X5 only (arm_dim [6, 6], ee_dim [1, 1]); "
@@ -263,16 +263,18 @@ class Model(ModelTemplate):
         self._wam_policy = server._policy  # for the binary-dim legality projection
         self._preprocessor = server._obs_preprocessor
 
-        if self.benchmark == "robotwin":
+        if self.benchmark == "robotwin" or "nft" in self.get_rl_modes():
             from openwam.dataloader.utils.unify_action import parse_unify_spec
 
             from .rl import OpenWAMNFTPolicy
 
             saved = OmegaConf.load(str(Path(ckpt_dir) / "config.yaml"))
-            if OmegaConf.select(saved, "dataloader.type") != "robotwin":
-                raise ValueError("RoboTwin mode requires a RoboTwin checkpoint.")
+            if OmegaConf.select(saved, "dataloader.type") != self.benchmark:
+                raise ValueError(f"Expected a {self.benchmark} checkpoint for this environment.")
+            if self.benchmark == "robodojo" and saved.dataloader.get("embodiment") != env_cfg_type:
+                raise ValueError("OpenWAM checkpoint embodiment must match the RoboDojo robot.")
             if self._engine.architecture.repr_contract.get("representation") != "eef":
-                raise ValueError("First RoboTwin adapter requires an EEF checkpoint.")
+                raise ValueError("OpenWAM RL requires an EEF checkpoint.")
             arch = self._engine.architecture
             if type(arch).__name__ != "DualSystemSelfAttnArchitecture":
                 raise NotImplementedError("First experiment supports dual_system joint_self_attn only.")
@@ -287,13 +289,13 @@ class Model(ModelTemplate):
                 indices = np.arange(20)
             indices = np.asarray(indices, dtype=np.int64)
             if len(indices) != 20 or len(np.unique(indices)) != 20 or np.any(indices < 0) or np.any(indices >= arch.action_dim):
-                raise ValueError("Expected 20 active RoboTwin EEF model dimensions.")
+                raise ValueError("Expected 20 active EEF model dimensions.")
             valid[indices] = True
             self.policy = OpenWAMNFTPolicy(arch, server.cfg.inference.denoise_steps, valid)
             if int(self.model_cfg.get("num_action_chunks", 1)) != 1:
                 raise ValueError("First NFT experiment executes one action per chunk.")
             if self.replan_steps not in (None, 1):
-                raise ValueError("First RoboTwin experiment requires replan_steps=1.")
+                raise ValueError("OpenWAM RL requires replan_steps=1.")
             self.replan_steps = 1
 
         if self.replan_steps is None:
@@ -350,7 +352,7 @@ class Model(ModelTemplate):
             raise ValueError("obs['vision'] must be a mapping of camera name -> {'color': image}")
         images = {}
         for camera_name, payload_name in _CAMERA_TO_PAYLOAD.items():
-            if camera_name == "cam_head" and self.benchmark == "robotwin":
+            if camera_name == "cam_head" and camera_name not in vision:
                 camera_name = "cam_high"
             camera = vision.get(camera_name)
             if not isinstance(camera, Mapping) or "color" not in camera:
@@ -462,7 +464,7 @@ class Model(ModelTemplate):
             return [self._hold_position_chunk(p) for p in payloads]
 
         conditions = [self._conditions(p) for p in payloads]
-        if self.benchmark == "robotwin":
+        if hasattr(self, "policy"):
             self.policy.sync_runtime()
             for condition in conditions:
                 condition["seed"] = int(self.model_cfg.get("seed", 42))
@@ -496,8 +498,8 @@ class Model(ModelTemplate):
 
         from .rl import JointReplay, flatten_replay_for_transport
 
-        if self.benchmark != "robotwin" or not hasattr(self, "policy"):
-            raise NotImplementedError("NFT is only implemented for RoboTwin EEF.")
+        if not hasattr(self, "policy"):
+            raise ValueError("Create an OpenWAM RL policy before sampling NFT transitions.")
         if mode not in ("train", "eval"):
             raise ValueError(f"Unknown rollout mode: {mode}")
         self.policy.sync_runtime()
