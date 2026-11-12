@@ -44,7 +44,7 @@ XPolicyLab 是策略代码与评测环境之间的共享层。每个模型的依
 - [数据与 Checkpoint](#-数据与-checkpoint)
 - [接入你自己的策略](#-接入你自己的策略)
 - [编程 Agent](#-编程-agent)
-- [在 RoboTwin 上做 RL 训练](#在-robotwin-上做-rl-训练)
+- [在 RoboDojo 和 RoboTwin 上做 RL 训练](#在-robodojo-和-robotwin-上做-rl-训练)
 - [引用](#-引用)
 - [联系方式](#-联系方式)
 
@@ -77,7 +77,7 @@ XPolicyLab 与具体 benchmark 解耦：任意 benchmark、仿真器或真机方
 
 **基础设施**
 
-- **RLinf 0.4.0** 在 RoboDojo 和 RoboTwin 上提供 OpenWAM NFT、Pi0.5 和 Abot 的 PPO/GRPO 配置。[OpenWAM 启动与输出](infra/RLinf/doc/OPENWAM_QUICKSTART_zh.md) · [Pi0.5 与 Abot 训练和恢复](infra/RLinf/doc/PI05_ABOT_QUICKSTART_zh.md)
+- **RLinf 0.4.0** 在 RoboDojo 和 RoboTwin 上提供 Pi0.5 的 PPO/GRPO 配置。[Pi0.5 部署与启动](infra/RLinf/doc/GUIDE_zh.md)
 - **StarVLA**：基础设施与策略栈；见 [policy/StarVLA](policy/StarVLA/README.md)。
 
 
@@ -139,7 +139,7 @@ policy/<POLICY>/
 ├── deploy.yml                   # deployment config
 ├── deploy.py                    # deployment loop
 ├── model.py                     # model adapter, served by the policy server
-└── rl.py                        # optional RLinf fill-in: _sample_policy, _log_prob_value
+└── rl.py                        # optional RLinf training methods
 ```
 
 `model.py` 实现面向模型的 API。`deploy.py` 把环境观测桥接到模型 server 调用。最小参考见 [policy/demo_policy](policy/demo_policy/README.md)。
@@ -159,7 +159,7 @@ policy/<POLICY>/
 | `compute_logprob_value(forward_inputs, compute_values=False)` | 可选。带梯度重算该样本：`logprobs`（与 `prev_logprobs` 同形）、`values`（`[B]`）、`entropy`（`[B, 1]`）。 |
 
 
-RLinf 的 PPO 与 GRPO 使用上面两个可选方法。填空样例是 [policy/demo_policy](policy/demo_policy/README.md#rl-training)：在 `rl.py` 里实现 `_sample_policy` 和 `_log_prob_value`，把可训练的 `nn.Module` 放到 `self.model` 或 `self.policy`，log-prob 真实可用后再把 `"ppo"` 或 `"grpo"` 加进 `RL_MODES`。`RL_MODES = ("eval",)` 时，评测仍使用 `get_action` / `get_action_batch`。
+要启用 PPO 或 GRPO，在 `rl.py` 中实现 `_sample_policy` 和 `_log_prob_value`，返回策略实际采样动作的对数概率，将可训练的 `nn.Module` 放在 `self.model` 或 `self.policy`，并将支持的算法加入 `RL_MODES`。`RL_MODES = ("eval",)` 时，评测使用 `get_action` 或 `get_action_batch`。[策略接入示例](policy/demo_policy/README.md#rl-training)
 
 策略 server 在 `update_obs` / `update_obs_batch` 之前已解码相机颜色，因此 `obs["vision"][<camera>]["color"]` 始终是图像数组 —— `model.py` 从不解码。
 
@@ -226,11 +226,13 @@ demo_env/
 
 有了这套布局，就可以在接入仿真 backed benchmark 之前，先测数据转换、模型加载、训练脚本与 debug 模式评测。
 
+将下例中的占位符换成策略和客户端使用的 GPU 编号及 Python 环境名。
+
 ```bash
 export EVAL_ENV_TYPE=debug
 cd policy/demo_policy
 bash install.sh
-bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 0 0 base base
+bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 '<policy-gpu-id>' '<client-gpu-id>' '<policy-env>' '<client-env>'
 ```
 
 任意 adapter 的模板相同 —— 替换 `demo_policy` 与参数即可：
@@ -280,7 +282,7 @@ bash eval.sh <bench_name> <task_name> <ckpt_name> <env_cfg_type> <action_type> <
 | `env_cfg_type`                 | 机器人 / 相机 / 场景配置键             | `arx_x5`                                                          |
 | `action_type`                  | 策略输出的动作空间                    | 通常为 `joint` 或 `ee`                                                |
 | `seed`                         | 训练或评测 seed / 布局 id           | `0`、`1`、`2`                                                       |
-| `policy_gpu_id` / `env_gpu_id` | 模型与仿真/client 各用哪张 GPU        | `0`、`1`                                                           |
+| `policy_gpu_id` / `env_gpu_id` | 模型与仿真/client 各用哪张 GPU        | 作业分配的设备编号 |
 | `policy_env_or_uv_path`        | 策略 server 的 conda 环境名或 uv 路径 | 你的策略侧环境                                                           |
 | `eval_env_conda_env`           | 仿真 / 机器人 client 的 conda 环境   | 你的评测侧环境                                                           |
 
@@ -291,7 +293,7 @@ bash eval.sh <bench_name> <task_name> <ckpt_name> <env_cfg_type> <action_type> <
 
 ```bash
 cd policy/AHA_WAM
-bash eval.sh RoboDojo stack_bowls cotrain arx_x5 joint 0 0 0 aha_wam robodojo
+bash eval.sh RoboDojo stack_bowls cotrain arx_x5 joint 0 '<policy-gpu-id>' '<client-gpu-id>' '<policy-env>' '<client-env>'
 # loads checkpoints/RoboDojo-cotrain-arx_x5-joint-0/ and evaluates on stack_bowls
 ```
 
@@ -532,21 +534,9 @@ python scripts/transform_lerobot_v21_format.py "<bench_name>.*.*" \
 
 不支持这些机制时要粘贴的清单在 [CONTRIBUTING.md](CONTRIBUTING.md#using-a-coding-agent)。
 
-## 在 RoboTwin 上做 RL 训练
+## 在 RoboDojo 和 RoboTwin 上做 RL 训练
 
-Pi0.5 的 PPO 和 GRPO 均已在真实 `adjust_bottle` 仿真中完成 rollout、actor 更新和新进程断点恢复。激活 Pi0.5 的 RL 环境后，在 RoboTwin 根目录运行以下命令即可检查 PPO 配置，无需启动 Ray。[Pi0.5 安装说明](policy/Pi_05/README.md#installation)
-
-```bash
-cd XPolicyLab
-git submodule update --init infra/RLinf/RLinf
-export ROBOTWIN_ASSETS_PATH=/path/to/root-containing-assets
-export POLICY_MODEL_PATH=/path/to/pi05-pytorch-checkpoint
-bash infra/RLinf/scripts/run.sh robotwin_adjust_bottle_ppo_xpolicylab_pi05 --cfg job --resolve
-```
-
-`Pi_05` 和 `Abot_M0` 均提供 `adjust_bottle` 的 PPO、GRPO 和评估配置。Pi0.5 双卡实测流程给出了显卡分配、保存第 1 步以及从存档续训到第 2 步的命令。[启动与恢复](infra/RLinf/doc/GUIDE.md#robotwin-adjust_bottle-training-and-resume) · [实验证据](infra/RLinf/doc/OPENPI_TRAINING.md#robotwin-adjust_bottle-真实仿真与断点恢复) · [策略和仿真环境扩展指南](infra/RLinf/doc/EXTENSIONS.md)
-
-adapter 填空样例是 [policy/demo_policy](policy/demo_policy/README.md#rl-training)。在 `rl.py` 里实现 `_sample_policy` 和 `_log_prob_value`，把可训练的 `nn.Module` 放到 `self.model` 或 `self.policy`，log-prob 真实可用后再把 `"ppo"` 或 `"grpo"` 加进 `RL_MODES`。`required_mode: eval` 仍使用 `get_action_batch`。
+选择 RoboTwin（`adjust_bottle`）或官方 RoboDojo（`stack_bowls`），从 XPolicyLab 启动 Pi0.5 PPO 或 GRPO。[RLinf 部署指南](infra/RLinf/doc/GUIDE_zh.md)
 
 ## 📝 引用
 

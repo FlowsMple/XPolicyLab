@@ -6,8 +6,6 @@
 
 Shared conventions — argument meanings, checkpoint naming, split-machine deployment, `EVAL_ENV_TYPE` — are documented in the [XPolicyLab README](../../README.md). Official results: [RoboDojo LeaderBoard](https://robodojo-benchmark.com/LeaderBoard).
 
-OpenWAM can train with RLinf NFT under **RoboDojo** (`stack_bowls`, `arx_x5`, Luminis) or **RoboTwin** (`adjust_bottle`, `aloha_agilex`). Both use the same NFT actor and loss. Select the simulator configuration and its matching EEF checkpoint, including normalization statistics. Both have completed real rollouts and saved actor updates. See the [L20-3 launch and output guide (中文)](../../infra/RLinf/doc/OPENWAM_QUICKSTART_zh.md), the [setup for either simulator](../../infra/RLinf/doc/GUIDE.md#openwam-nft-on-either-simulator) and the [training results](../../infra/RLinf/doc/TRAINING_RESULTS.md).
-
 ## Installation
 
 Create a Python >= 3.10 environment, then install the official PyTorch CUDA wheel before the adapter packages:

@@ -1,4 +1,4 @@
-"""Policy exports; loading RL helpers does not initialize the model runtime."""
+"""Public exports for the Abot policy and evaluation client."""
 from .deploy import eval_one_episode, eval_one_episode_batch
 
 __all__ = ["Model", "get_model", "eval_one_episode", "eval_one_episode_batch"]

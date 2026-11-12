@@ -16,7 +16,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor, env, rollout: 0-7
+    actor, env, rollout: all
 
 runner:
   task_type: embodied
@@ -70,8 +70,8 @@ env:
   group_name: "EnvGroup"
   enable_offload: True
   train:
-    rollout_epoch: 2
-    total_num_envs: 24
+    rollout_epoch: 4
+    total_num_envs: 256
     reward_coef: ${algorithm.reward_coef}
     group_size: ${algorithm.group_size}
     assets_path: ${oc.env:ROBOTWIN_ASSETS_PATH}
@@ -93,12 +93,12 @@ env:
         crazy_random_light_rate: 0
   eval:
     rollout_epoch: 1
-    total_num_envs: 24
+    total_num_envs: 128
     auto_reset: True
     ignore_terminations: True
     reward_coef: ${algorithm.reward_coef}
     group_size: 1
-    use_fixed_reset_state_ids: True
+    use_fixed_reset_state_ids: False
     is_eval: True
     assets_path: ${oc.env:ROBOTWIN_ASSETS_PATH}
     seeds_path: ${oc.env:RLINF_PATH}/rlinf/envs/sim/robotwin/seeds/eval_seeds.json
@@ -132,7 +132,7 @@ actor:
   group_name: "ActorGroup"
   training_backend: "fsdp"
   micro_batch_size: 8
-  global_batch_size: 192
+  global_batch_size: 2048
   seed: 1234
   enable_offload: True
 

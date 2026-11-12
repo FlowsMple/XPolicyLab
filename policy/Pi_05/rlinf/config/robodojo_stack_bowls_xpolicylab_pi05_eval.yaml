@@ -1,9 +1,10 @@
-# Initial single-device smoke configuration; requires task-matched weights/stats.
 defaults:
 - env/robodojo_stack_bowls@env.eval
 - model/xpolicylab_pi05@rollout.model
 - override hydra/job_logging: stdout
 - _self_
+task_name: stack_bowls
+episode_steps: 800
 hydra:
   run:
     dir: .
@@ -13,13 +14,13 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    env, rollout: '0'
+    env, rollout: all
 runner:
   task_type: embodied_eval
   logger:
     log_path: ${oc.env:RLINF_PATH}/../results
     project_name: robodojo_rlinf
-    experiment_name: robodojo_stack_bowls_xpolicylab_pi05_eval
+    experiment_name: robodojo_${env.eval.init_params.task_name}_xpolicylab_pi05_eval
     logger_backends:
     - tensorboard
   max_epochs: 1000
@@ -33,12 +34,10 @@ env:
   group_name: EnvGroup
   enable_offload: false
   eval:
+    total_num_envs: 128
     is_eval: true
-    use_fixed_reset_state_ids: true
     init_params:
       layout_seed: 1
-    enable_shaping: false
-    shaping_weight: 0.0
 rollout:
   group_name: RolloutGroup
   rollout_backend: huggingface
@@ -58,9 +57,9 @@ rollout:
         - eval
         - grpo
       train_config_name: ${oc.env:PI05_TRAIN_CONFIG,pi05_base_aloha_full_sim_arx-x5_seed_0}
-      repo_id: ${oc.env:PI05_REPO_ID,robodojo_stack_bowls}
+      repo_id: ${oc.env:PI05_REPO_ID,robodojo_${env.eval.init_params.task_name}}
       env_cfg_type: arx_x5
       action_type: joint
       rl_head:
         num_steps: 5
-      task_name: stack_bowls
+      task_name: ${env.eval.init_params.task_name}

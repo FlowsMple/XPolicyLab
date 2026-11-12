@@ -252,12 +252,18 @@ def save_metadata(cfg, destination):
 
 def preflight(cfg):
     """Validate real inputs before starting Ray or constructing a large model."""
+    model_path = cfg.actor.model.model_path
+    if not model_path:
+        raise ValueError(
+            "Set POLICY_MODEL_PATH or actor.model.model_path to the Pi0.5 PyTorch "
+            "checkpoint used to initialize SFT."
+        )
     from rlinf.models.embodiment.openpi.checkpoint import (
         resolve_full_weights,
         resolve_model_safetensors,
     )
 
-    path = Path(cfg.actor.model.model_path).expanduser()
+    path = Path(model_path).expanduser()
     if resolve_full_weights(path) is None and resolve_model_safetensors(path) is None:
         raise FileNotFoundError(
             f"Native PyTorch model weights not found at {path}; "

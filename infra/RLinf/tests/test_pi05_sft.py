@@ -93,6 +93,9 @@ def test_checkpoints_do_not_overlap_official_run(cfg, tmp_path):
 def test_preflight_rejects_jax_weights_and_accidental_overwrite(
     cfg, tmp_path, monkeypatch
 ):
+    monkeypatch.delenv("POLICY_MODEL_PATH", raising=False)
+    with pytest.raises(ValueError, match="POLICY_MODEL_PATH"):
+        sft.preflight(cfg)
     cfg.actor.model.model_path = str(tmp_path / "base")
     (tmp_path / "base" / "params").mkdir(parents=True)
     with pytest.raises(FileNotFoundError, match="JAX"):

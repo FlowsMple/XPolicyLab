@@ -25,7 +25,7 @@ class SimulatorProcess:
         *,
         timeout=300,
         render_gpu=None,
-        factory="src.rlinf_bridge.runtime:SimulatorBackend",
+        factory="infra.RLinf.envs.robodojo.runtime:SimulatorBackend",
     ):
         self.timeout = float(timeout)
         if self.timeout <= 0:
@@ -39,13 +39,17 @@ class SimulatorProcess:
         self.connection, child = Pipe(duplex=True)
         env = os.environ.copy()
         root = Path(root).resolve()
-        env["PYTHONPATH"] = os.pathsep.join((str(root), str(root / "XPolicyLab")))
+        # RoboDojo owns env/src/utils. Load infra and client_server from the
+        # active adapter even when the simulator has another submodule revision.
+        adapter_root = Path(__file__).resolve().parents[4]
+        env["PYTHONPATH"] = os.pathsep.join((str(root), str(adapter_root)))
         env.pop("PYTHONHOME", None)
         self.process = None
         try:
             self.process = subprocess.Popen(
                 [
                     str(python),
+                    "-P",  # Keep the adapter's env.py off the host's import path.
                     str(Path(__file__).resolve()),
                     str(child.fileno()),
                     factory,

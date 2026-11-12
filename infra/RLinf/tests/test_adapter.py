@@ -217,27 +217,6 @@ def test_adapter_registers_policy_module_parameters():
     assert wrapper.backbone is policy.model
 
 
-def test_abot_grpo_wrap_targets_omit_missing_value_head():
-    from XPolicyLab.policy.Abot_M0.rl import AbotRLConfig, AbotRLPolicy
-
-    def policy(add_value_head):
-        obj = AbotRLPolicy.__new__(AbotRLPolicy)
-        obj.rl_config = AbotRLConfig(add_value_head=add_value_head)
-        obj.base_model = SimpleNamespace(
-            qwen_vl_interface=SimpleNamespace(
-                model=SimpleNamespace(_no_split_modules=["Qwen3VLDecoderLayer"])
-            )
-        )
-        return obj
-
-    grpo = policy(False)
-    assert "ValueHead" not in grpo._no_split_modules
-    assert "value_head" not in grpo._no_split_names
-    ppo = policy(True)
-    assert ppo._no_split_modules[-1] == "ValueHead"
-    assert ppo._no_split_names[-1] == "value_head"
-
-
 def test_adapter_ppo_requires_values_but_grpo_does_not():
     ppo = XPolicyLabForRLActionPrediction(
         _RLPolicy(modes=["eval", "ppo"], return_values=False),
@@ -392,16 +371,3 @@ def test_pack_action_steps_dual_arm_joint():
     assert packed.shape == (1, 2, 14)
     np.testing.assert_allclose(packed[0, 0, :6], np.arange(6))
     np.testing.assert_allclose(packed[0, 0, 6:7], [0.5])
-
-
-def test_recoverable_ee_execution_failure_is_specific():
-    from XPolicyLab.policy.OpenWAM.rlinf.robotwin_env import is_recoverable_ee_execution_failure
-
-    assert is_recoverable_ee_execution_failure(
-        RuntimeError("Fail to parameterize path")
-    )
-    assert is_recoverable_ee_execution_failure(ZeroDivisionError())
-    assert not is_recoverable_ee_execution_failure(RuntimeError("IK failed"))
-    assert not is_recoverable_ee_execution_failure(
-        ValueError("Fail to parameterize path")
-    )

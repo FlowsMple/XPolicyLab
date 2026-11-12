@@ -177,8 +177,6 @@ def _to_pil(value: Any, ctx: str):
 
 
 class Model(ModelTemplate):
-    RL_MODES = ("eval", "nft")
-
     def __init__(self, model_cfg):
         self.model_cfg = dict(model_cfg)
         self.benchmark = str(self.model_cfg.get("openwam_benchmark") or "robodojo").lower()
@@ -194,9 +192,6 @@ class Model(ModelTemplate):
         dim_info = get_robot_action_dim_info(env_cfg_type)
         self.action_type = action_type
         self.robot_action_dim_info = dim_info
-        if "nft" in self.get_rl_modes():
-            if not self.model_cfg.get("experimental_nft", False):
-                raise ValueError("NFT requires explicit experimental_nft=true.")
         if list(dim_info.get("arm_dim") or []) != _EXPECTED_ARM_DIMS or list(dim_info.get("ee_dim") or []) != _EXPECTED_EE_DIMS:
             raise ValueError(
                 "OpenWAM's RoboDojo checkpoint is dual-X5 only (arm_dim [6, 6], ee_dim [1, 1]); "
@@ -226,8 +221,6 @@ class Model(ModelTemplate):
         self._order: list[int] = []
 
         self.allow_dummy_policy = _is_true(self.model_cfg.get("allow_dummy_policy", False))
-        if self.allow_dummy_policy and "nft" in self.get_rl_modes():
-            raise ValueError("Dummy policy cannot be used for NFT training.")
         self._engine = None
         self._wam_policy = None
         self._preprocessor = None
@@ -263,40 +256,14 @@ class Model(ModelTemplate):
         self._wam_policy = server._policy  # for the binary-dim legality projection
         self._preprocessor = server._obs_preprocessor
 
-        if self.benchmark == "robotwin" or "nft" in self.get_rl_modes():
-            from openwam.dataloader.utils.unify_action import parse_unify_spec
-
-            from .rl import OpenWAMNFTPolicy
-
+        if self.benchmark == "robotwin":
             saved = OmegaConf.load(str(Path(ckpt_dir) / "config.yaml"))
-            if OmegaConf.select(saved, "dataloader.type") != self.benchmark:
-                raise ValueError(f"Expected a {self.benchmark} checkpoint for this environment.")
-            if self.benchmark == "robodojo" and saved.dataloader.get("embodiment") != env_cfg_type:
-                raise ValueError("OpenWAM checkpoint embodiment must match the RoboDojo robot.")
+            if OmegaConf.select(saved, "dataloader.type") != "robotwin":
+                raise ValueError("Expected a RoboTwin checkpoint.")
             if self._engine.architecture.repr_contract.get("representation") != "eef":
-                raise ValueError("OpenWAM RL requires an EEF checkpoint.")
-            arch = self._engine.architecture
-            if type(arch).__name__ != "DualSystemSelfAttnArchitecture":
-                raise NotImplementedError("First experiment supports dual_system joint_self_attn only.")
-            if float(self._engine._cfg_scale) != 1.0:
-                raise ValueError("First experiment requires checkpoint-compatible CFG scale 1.")
-            if str(server.cfg.inference.denoise_mode) != "sync":
-                raise ValueError("First experiment supports sync denoising only.")
-            valid = np.zeros(arch.action_dim, dtype=bool)
-            if OmegaConf.select(saved, "dataloader.unify_action", default=False):
-                indices = parse_unify_spec(OmegaConf.to_container(saved.dataloader.unify_action_map))
-            else:
-                indices = np.arange(20)
-            indices = np.asarray(indices, dtype=np.int64)
-            if len(indices) != 20 or len(np.unique(indices)) != 20 or np.any(indices < 0) or np.any(indices >= arch.action_dim):
-                raise ValueError("Expected 20 active EEF model dimensions.")
-            valid[indices] = True
-            self.policy = OpenWAMNFTPolicy(arch, server.cfg.inference.denoise_steps, valid)
-            if int(self.model_cfg.get("num_action_chunks", 1)) != 1:
-                raise ValueError("First NFT experiment executes one action per chunk.")
-            if self.replan_steps not in (None, 1):
-                raise ValueError("OpenWAM RL requires replan_steps=1.")
-            self.replan_steps = 1
+                raise ValueError("RoboTwin inference requires an EEF checkpoint.")
+            if self.replan_steps is None:
+                self.replan_steps = 1
 
         if self.replan_steps is None:
             horizon = OmegaConf.select(server.cfg, "inference.inference_horizon", default=None)
@@ -464,8 +431,7 @@ class Model(ModelTemplate):
             return [self._hold_position_chunk(p) for p in payloads]
 
         conditions = [self._conditions(p) for p in payloads]
-        if hasattr(self, "policy"):
-            self.policy.sync_runtime()
+        if self.benchmark == "robotwin":
             for condition in conditions:
                 condition["seed"] = int(self.model_cfg.get("seed", 42))
         result = self._engine.generate_batch(conditions)
@@ -490,44 +456,3 @@ class Model(ModelTemplate):
     def reset(self):
         self._batch = {}
         self._order = []
-
-    def predict_action_batch_rl(self, obs_list, mode="train", compute_values=False, **kwargs):
-        import torch
-
-        from XPolicyLab.utils.process_data import pack_robot_state
-
-        from .rl import JointReplay, flatten_replay_for_transport
-
-        if not hasattr(self, "policy"):
-            raise ValueError("Create an OpenWAM RL policy before sampling NFT transitions.")
-        if mode not in ("train", "eval"):
-            raise ValueError(f"Unknown rollout mode: {mode}")
-        self.policy.sync_runtime()
-        conditions = [self._conditions(self._encode_obs(obs)) for obs in obs_list]
-        # generate_batch denoises the whole batch with one noise seed.
-        if mode == "train":
-            seed = int(torch.randint(0, 2**31 - 1, ()).item())
-        else:
-            seed = int(self.model_cfg.get("seed", 42))
-        for condition in conditions:
-            condition["seed"] = seed
-        selected_step = kwargs.get("nft_step_index")
-        if selected_step is None:
-            selected_step = int(torch.randint(self.policy.num_steps, ()).item())
-        if not 0 <= int(selected_step) < self.policy.num_steps:
-            raise ValueError("nft_step_index is outside the denoising schedule.")
-        replay = JointReplay(int(selected_step))
-        result = self._engine.generate_batch(conditions, step_observer=replay)
-        raw = self._wam_policy._project_binary_dims(result["actions"])
-        actions = np.stack([
-            np.stack([pack_robot_state({"state": step}, "ee", self.robot_action_dim_info)
-                      for step in self._eef20_chunk_to_native(row[:1])])
-            for row in raw
-        ])
-        data = replay.data
-        data["nft_sigma"] = data["nft_action_t"].float() / float(self.policy.architecture.action_scheduler.num_train_timesteps)
-        data["nft_valid_dims"] = self.policy.valid_dims.detach().cpu()[None].expand(len(conditions), -1).clone()
-        return actions, {"forward_inputs": flatten_replay_for_transport(data)}
-
-    def nft_forward(self, forward_inputs, **kwargs):
-        return self.policy(forward_inputs)

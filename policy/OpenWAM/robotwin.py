@@ -58,29 +58,3 @@ def eef20_to_steps(chunk):
             }
         )
     return steps
-
-
-def native_obs_to_packed(raw, quaternion_order):
-    end = raw["endpose"]
-    return np.concatenate(
-        [
-            pose_order(end["left_endpose"], quaternion_order, "wxyz"),
-            np.asarray(end["left_gripper"]).reshape(1),
-            pose_order(end["right_endpose"], quaternion_order, "wxyz"),
-            np.asarray(end["right_gripper"]).reshape(1),
-        ]
-    ).astype(np.float32)
-
-
-def packed_to_native(action, quaternion_order):
-    action = np.asarray(action, dtype=np.float32)
-    if action.shape != (16,) or not np.isfinite(action).all():
-        raise ValueError("RoboTwin EE boundary expects finite [16] actions.")
-    return np.concatenate(
-        [
-            pose_order(action[:7], "wxyz", quaternion_order),
-            action[7:8],
-            pose_order(action[8:15], "wxyz", quaternion_order),
-            action[15:16],
-        ]
-    )

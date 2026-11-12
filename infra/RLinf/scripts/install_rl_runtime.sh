@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Install the RLinf policy-side runtime into the already-active interpreter.
-# Run this yourself after policy/<POLICY>/install.sh, in that same env:
-#   conda activate <policy_env>   # or: source openpi/.venv/bin/activate
-#   bash infra/RLinf/scripts/install_rl_runtime.sh
+# Activate the training environment with XPolicyLab and the policy dependencies
+# installed. For Pi0.5, follow policy/Pi_05/README.md from the XPolicyLab root.
 # Optional: RL_PYTHON / RL_PIP override the interpreter and install command.
 # The RoboTwin env worker imports robotwin.envs.vector_env in its own interpreter.
 # Provide the RoboTwin runtime and its simulator dependencies there.
@@ -15,7 +14,7 @@ while [[ $# -gt 0 ]]; do
     --upgrade-torch) UPGRADE_TORCH=1; shift ;;
     -h|--help)
       echo "usage: bash install_rl_runtime.sh [--upgrade-torch]" >&2
-      echo "Run after policy/<POLICY>/install.sh, with that env already active." >&2
+      echo "Activate the policy training environment first. For Pi0.5, see policy/Pi_05/README.md." >&2
       exit 0
       ;;
     *)
@@ -47,7 +46,7 @@ fi
 
 if ! "${RL_PYTHON}" -I -c "import XPolicyLab" >/dev/null 2>&1; then
   echo "[install_rl_runtime] XPolicyLab is not importable in ${RL_PYTHON}." >&2
-  echo "[install_rl_runtime] Finish bash policy/<POLICY>/install.sh and activate that env first." >&2
+  echo "[install_rl_runtime] Activate the training environment and install XPolicyLab from its root with: python -m pip install -e ." >&2
   exit 1
 fi
 

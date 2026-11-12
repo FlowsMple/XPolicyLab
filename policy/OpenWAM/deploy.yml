@@ -41,5 +41,3 @@ allow_dummy_policy: false
 
 # Opt-in RoboTwin branch; RoboDojo serving remains the default.
 openwam_benchmark: robodojo
-# Only enable for the experimental RLinf NFT recipe (see RLINF_EXPERIMENTS.md).
-experimental_nft: false

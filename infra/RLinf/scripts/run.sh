@@ -2,7 +2,7 @@
 # Launch RoboTwin/RoboDojo RL training or evaluation with the XPolicyLab adapter and the vendored RLinf checkout.
 # Required environment variables when the selected config needs them:
 #   ROBOTWIN_ASSETS_PATH  RoboTwin embodiment assets
-#   POLICY_MODEL_PATH     Pi_05 or Abot_M0 checkpoint
+#   POLICY_MODEL_PATH     policy checkpoint
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)

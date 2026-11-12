@@ -50,17 +50,9 @@ def test_discover_new_components(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "policy, backend, critic, only_eval, expected_env, expected_rollout",
     [
-        ("OpenWAM", "isaaclab", False, False, "NativeEnv", "XPolicyLabRolloutWorker"),
-        (
-            "OpenWAM",
-            "robotwin",
-            False,
-            True,
-            "OpenWAMRoboTwinEnv",
-            "XPolicyLabRolloutWorker",
-        ),
+        ("Pi_05", "robotwin", False, True, "NativeEnv", "XPolicyLabRolloutWorker"),
         ("Pi_05", "isaaclab", True, False, "NativeEnv", "RoboDojoRolloutWorker"),
-        ("Abot_M0", "robotwin", True, False, "NativeEnv", "XPolicyLabRolloutWorker"),
+        ("Pi_05", "robotwin", True, False, "NativeEnv", "XPolicyLabRolloutWorker"),
     ],
 )
 def test_worker_selection(
@@ -71,7 +63,7 @@ def test_worker_selection(
     from XPolicyLab.infra.RLinf.workers.rollout import rollout_worker
 
     model = {
-        "xpolicylab": {"policy_name": policy, "required_mode": "nft"},
+        "xpolicylab": {"policy_name": policy, "required_mode": "eval" if only_eval else "ppo"},
         "add_value_head": critic,
     }
     env = {"env_type": backend, "init_params": {"id": ENV_ID}}
@@ -92,11 +84,6 @@ def test_worker_selection(
     )
     assert selected.__name__ == expected_env
     assert rollout_worker(cfg).__name__ == expected_rollout
-    if policy == "OpenWAM" and not only_eval:
-        assert (
-            extensions.policy_extension(cfg.actor.model).actor_worker(cfg).__name__
-            == "OpenWAMNFTWorker"
-        )
 
 
 @pytest.mark.parametrize("only_eval", [True, False])

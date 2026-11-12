@@ -5,17 +5,13 @@ total_num_envs: 1
 auto_reset: false
 ignore_terminations: false
 enable_offload: false
-reward_coef: 1.0
 seed: 0
 group_size: 1
 use_fixed_reset_state_ids: false
-max_steps_per_rollout_epoch: 800
-max_episode_steps: 800
+max_steps_per_rollout_epoch: ${.max_episode_steps}
+max_episode_steps: ${oc.select:episode_steps,800}
 is_eval: false
 rollout_epoch: 1
-gamma: 0.99
-enable_shaping: false
-shaping_weight: 0.0
 robodojo_root: ${oc.env:ROBODOJO_ROOT}
 sim_python: ${oc.env:ROBODOJO_SIM_PYTHON}
 rpc_timeout: 300
@@ -24,7 +20,7 @@ video_cfg:
   save_video: false
 init_params:
   id: RoboDojo-Stack-Bowls-XPolicyLab-v0
-  task_name: stack_bowls
+  task_name: ${oc.select:task_name,stack_bowls}
   env_cfg_type: arx_x5
   device: cuda:0
-  layout_seed: 0
+  layout_seed: [0, 2]

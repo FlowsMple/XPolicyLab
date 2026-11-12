@@ -13,7 +13,7 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    env, rollout: 0-7
+    env, rollout: all
 
 runner:
   task_type: embodied_eval
@@ -43,7 +43,7 @@ env:
     ignore_terminations: True
     reward_coef: 1.0
     group_size: 1
-    use_fixed_reset_state_ids: True
+    use_fixed_reset_state_ids: False
     is_eval: True
     assets_path: ${oc.env:ROBOTWIN_ASSETS_PATH}
     seeds_path: ${oc.env:RLINF_PATH}/rlinf/envs/sim/robotwin/seeds/eval_seeds.json

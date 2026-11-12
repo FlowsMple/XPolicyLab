@@ -1,8 +1,8 @@
-"""RLinf v0.4 synchronous RoboDojo stack_bowls environment.
+"""RLinf v0.4 synchronous RoboDojo environment.
 
 Finished slots retain terminal observations and receive no further actions.
 Isaac still advances the shared scene for live slots; no partial reset is used.
-Rewards are emitted once per chunk, matching RLinf's chunk-level discount.
+Each executed action receives its native simulator reward.
 """
 
 from __future__ import annotations
@@ -15,12 +15,7 @@ import torch
 
 from .extension import ENV_ID as ENV_ID
 from .process import SimulatorProcess
-
-
-def potential_reward(previous, current, success, terminated, *, gamma, weight):
-    """True terminal states have zero potential; time limits retain potential."""
-    final = np.where(terminated, 0.0, current)
-    return np.asarray(success, dtype=np.float32) + weight * (gamma * final - previous)
+from ..layouts import LayoutSampler
 
 
 def pack_observations(observations, dimensions, action_type="joint"):
@@ -63,7 +58,7 @@ def pack_observations(observations, dimensions, action_type="joint"):
                 ]
             )
         ),
-        "task_descriptions": ["Stack the three bowls together."] * len(observations),
+        "task_descriptions": [str(obs["instruction"]) for obs in observations],
     }
 
 
@@ -78,7 +73,7 @@ class RoboDojoEnv:
         *,
         backend=None,
     ):
-        del total_num_processes, worker_info
+        del worker_info
         self.cfg, self.num_envs = cfg, int(num_envs)
         if cfg.get("auto_reset", False) or cfg.get("ignore_terminations", False):
             raise ValueError(
@@ -100,25 +95,15 @@ class RoboDojoEnv:
         self.auto_reset = self.ignore_terminations = False
         self.is_start = True
         self.max_steps = int(cfg.max_episode_steps)
-        self.enable_shaping = bool(cfg.get("enable_shaping", False))
-        if self.enable_shaping and "gamma" not in cfg:
-            raise ValueError("Explicit shaping requires gamma supplied by the RL algorithm.")
-        self.gamma = float(cfg.get("gamma", 1.0))
-        self.weight = float(cfg.get("shaping_weight", 0.0))
-        if not 0 <= self.gamma <= 1 or self.weight < 0 or self.max_steps <= 0:
-            raise ValueError(
-                "Invalid RoboDojo reward discount/weight or episode length."
-            )
-        if not self.enable_shaping and self.weight != 0:
-            raise ValueError("Set enable_shaping=true explicitly before using a nonzero shaping_weight.")
-        self.rng = np.random.default_rng(int(cfg.get("seed", 0)) + seed_offset)
+        if self.max_steps <= 0:
+            raise ValueError("RoboDojo max_episode_steps must be positive.")
         if backend is None:
             params = OmegaConf.to_container(cfg.init_params, resolve=True)
             params.pop("id", None)
             params.update(
                 num_envs=self.num_envs,
                 max_episode_steps=self.max_steps,
-                seed=int(cfg.get("seed", 0)) + seed_offset,
+                seed=int(cfg.get("seed", 0)) + seed_offset * self.num_envs,
             )
             backend = SimulatorProcess(
                 cfg.sim_python,
@@ -135,8 +120,16 @@ class RoboDojoEnv:
             self.action_dim = pose_dims + sum(self.dimensions["ee_dim"])
             self.layout_count = int(self.backend.metadata["num_layouts"])
             if self.layout_count <= 0:
-                raise ValueError("No stack_bowls layouts available.")
+                raise ValueError("The selected RoboDojo task has no evaluation layouts.")
+            self.layout_sampler = LayoutSampler(
+                np.arange(self.layout_count),
+                seed=int(cfg.get("seed", 0)),
+                groups=self.num_envs // self.group_size,
+                rank=seed_offset,
+                world_size=total_num_processes,
+            )
             self.reset_state_ids = None
+            self._layouts_ready = False
             self.update_reset_state_ids()
             self._observations = None
         except BaseException:
@@ -144,34 +137,32 @@ class RoboDojoEnv:
             raise
 
     def update_reset_state_ids(self):
-        if (
+        if self._layouts_ready or (
             self.cfg.get("use_fixed_reset_state_ids", False)
             and self.reset_state_ids is not None
         ):
             return
-        groups = self.rng.integers(
-            self.layout_count, size=self.num_envs // self.group_size
-        )
+        groups = self.layout_sampler.take()
         self.reset_state_ids = np.repeat(groups, self.group_size).tolist()
+        self._layouts_ready = True
 
     def reset(self, seed=None, env_ids=None, options=None):
         del options
         if env_ids is not None:
             raise NotImplementedError("RoboDojo supports full-batch resets only.")
         if seed is not None:
-            self.rng = np.random.default_rng(seed)
+            self.layout_sampler.reseed(seed)
             self.reset_state_ids = None
+            self._layouts_ready = False
         self.update_reset_state_ids()
         result = self.backend.reset(self.reset_state_ids)
+        self.official_score = None
         self._accept(result)
         if np.any(self.terminated | self.truncated):
             raise RuntimeError("RoboDojo returned an already finished initial state.")
+        self._layouts_ready = False
         self.elapsed_steps = torch.zeros(self.num_envs, dtype=torch.long)
         self.returns = np.zeros(self.num_envs, dtype=np.float32)
-        self.peak_progress = self.progress.copy()
-        self.regressed = np.zeros(self.num_envs, dtype=bool)
-        self.recoveries = np.zeros(self.num_envs, dtype=np.int64)
-        self.regressions = np.zeros(self.num_envs, dtype=np.int64)
         return pack_observations(self._observations, self.dimensions, self.action_type), {}
 
     def _accept(self, result, active=None):
@@ -182,25 +173,22 @@ class RoboDojoEnv:
         fields = {
             key: np.asarray(
                 result[key],
-                dtype=np.float32 if key in ("progress", "official_score") else bool,
+                dtype=np.float32 if key == "reward" else bool,
             )
-            for key in ("progress", "official_score", "success", "failed", "truncated")
+            for key in ("reward", "success", "failed", "truncated")
         }
+        if "official_score" in result:
+            fields["official_score"] = np.asarray(result["official_score"], dtype=np.float32)
         for key, values in fields.items():
             if values.shape != (self.num_envs,) or not np.isfinite(values).all():
                 raise ValueError(
                     f"Invalid RoboDojo {key}: expected finite batch vector."
                 )
-        if np.any((fields["progress"] < 0) | (fields["progress"] > 1)):
-            raise ValueError("RoboDojo progress must be in [0, 1].")
-        fields["base_reward"] = np.asarray(result.get("base_reward", fields["success"]), dtype=np.float32)
-        if fields["base_reward"].shape != (self.num_envs,) or not np.isfinite(fields["base_reward"]).all():
-            raise ValueError("Invalid simulator base_reward batch.")
         fields["terminated"] = fields["success"] | fields["failed"]
         if np.any(fields["terminated"] & fields["truncated"]):
             raise ValueError("RoboDojo cannot terminate and truncate the same slot.")
         for key, values in fields.items():
-            if not hasattr(self, key):
+            if getattr(self, key, None) is None:
                 setattr(self, key, values.copy())
             else:
                 getattr(self, key)[active] = values[active]
@@ -232,12 +220,9 @@ class RoboDojoEnv:
         if not np.isfinite(actions).all():
             raise ValueError("RoboDojo actions must be finite.")
         horizon = actions.shape[1]
-        initially_active = ~(self.terminated | self.truncated)
-        previous = self.progress.copy()
-        base_reward = np.zeros(self.num_envs, dtype=np.float32)
+        rewards = np.zeros((self.num_envs, horizon), dtype=np.float32)
         term = np.zeros((self.num_envs, horizon), dtype=bool)
         trunc = term.copy()
-        last_step = np.zeros(self.num_envs, dtype=int)
         for j in range(horizon):
             active = ~(self.terminated | self.truncated)
             indices = np.flatnonzero(active).tolist()
@@ -249,53 +234,19 @@ class RoboDojoEnv:
                     for i in indices
                 ]
                 self._accept(self.backend.step(unpacked, indices), active)
-                base_reward[active] += self.base_reward[active]
+                rewards[active, j] = self.reward[active]
                 self.elapsed_steps[active] += 1
-                self.truncated |= (
-                    self.elapsed_steps.numpy() >= self.max_steps
-                ) & ~self.terminated
-                last_step[active] = j
-                dropped = active & (self.progress < self.peak_progress - 1e-6)
-                self.regressions += dropped & ~self.regressed
-                self.regressed |= dropped
-                restored = (
-                    active
-                    & self.regressed
-                    & (self.progress >= self.peak_progress - 1e-6)
-                )
-                self.recoveries += restored
-                self.regressed[restored] = False
-                self.peak_progress = np.maximum(self.peak_progress, self.progress)
             term[:, j], trunc[:, j] = self.terminated, self.truncated
-        shaping_reward = np.zeros(self.num_envs, dtype=np.float32)
-        if self.enable_shaping:
-            shaping_reward = potential_reward(
-                previous, self.progress, False, self.terminated,
-                gamma=self.gamma, weight=self.weight,
-            )
-        scale = initially_active * float(self.cfg.get("reward_coef", 1.0))
-        base_reward *= scale
-        shaping_reward *= scale
-        boundary_reward = base_reward + shaping_reward
-        rewards = np.zeros((self.num_envs, horizon), dtype=np.float32)
-        rewards[np.arange(self.num_envs), last_step] = boundary_reward
-        self.returns += boundary_reward
+        self.returns += rewards.sum(axis=1)
         obs = pack_observations(self._observations, self.dimensions, self.action_type)
         episode = {
             "success_once": self.success.copy(),
             "return": self.returns.copy(),
             "episode_len": self.elapsed_steps.numpy().copy(),
-            "official_score": self.official_score.copy(),
-            "progress": self.progress.copy(),
-            "regressions": self.regressions.copy(),
-            "recoveries": self.recoveries.copy(),
         }
+        if self.official_score is not None:
+            episode["official_score"] = self.official_score.copy()
         info = {
-            "reward_components": {
-                "base_reward": torch.from_numpy(base_reward.copy()),
-                "shaping_reward": torch.from_numpy(np.asarray(shaping_reward, dtype=np.float32).copy()),
-                "returned_reward": torch.from_numpy(boundary_reward.copy()),
-            },
             "episode": {k: torch.from_numpy(v) for k, v in episode.items()},
             "final_observation": obs,
             "_final_observation": torch.from_numpy(self.terminated | self.truncated),

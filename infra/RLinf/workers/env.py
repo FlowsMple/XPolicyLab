@@ -5,11 +5,11 @@ from rlinf.workers.env.env_worker import EnvWorker
 
 class XPolicyLabEnvWorker(EnvWorker):
     def _setup_env_and_wrappers(self, env_cls, env_cfg, num_envs_per_stage):
-        from ..core.extensions import policy_extension
+        from ..core.extensions import policy_extension, simulator_extension
 
-        policy = policy_extension(self.model_cfg)
-        if hasattr(policy, "env_class"):
-            env_cls = policy.env_class(env_cfg) or env_cls
+        for extension in (simulator_extension(env_cfg), policy_extension(self.model_cfg)):
+            if hasattr(extension, "env_class"):
+                env_cls = extension.env_class(env_cfg) or env_cls
         return super()._setup_env_and_wrappers(env_cls, env_cfg, num_envs_per_stage)
 
     def close_environments(self):

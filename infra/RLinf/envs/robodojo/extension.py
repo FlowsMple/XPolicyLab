@@ -60,16 +60,8 @@ def validate(cfg, model, env, mode):
             raise ValueError(
                 "RoboDojo PPO requires add_value_head=true for timeout bootstrap."
             )
-        if cfg.algorithm.reward_type != "chunk_level" or (
-            env.get("enable_shaping", False) and env.gamma != cfg.algorithm.gamma
-        ):
-            raise ValueError(
-                "RoboDojo shaping and RLinf must share chunk-level discount gamma."
-            )
-        if cfg.algorithm.adv_type == "grpo" and env.shaping_weight != 0:
-            raise ValueError(
-                "Use sparse success reward for GRPO; potential shaping is supported for PPO only."
-            )
+        if cfg.algorithm.reward_type != "chunk_level":
+            raise ValueError("RoboDojo requires chunk-level rewards in RLinf.")
         if cfg.algorithm.loss_type == "embodied_nft":
             if (
                 model.xpolicylab.required_mode != "nft"
