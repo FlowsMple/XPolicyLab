@@ -137,7 +137,7 @@ policy/<POLICY>/
 ├── deploy.yml                   # deployment config
 ├── deploy.py                    # deployment loop
 ├── model.py                     # model adapter, served by the policy server
-└── rl.py                        # optional RLinf training methods
+└── rl.py                        # optional RLinf fill-in: _sample_policy, _log_prob_value
 ```
 
 `model.py` implements the model-facing API. `deploy.py` bridges environment observations to model-server calls. Use [policy/demo_policy](policy/demo_policy/README.md) as the minimal adapter reference.
@@ -157,7 +157,7 @@ policy/<POLICY>/
 | `compute_logprob_value(forward_inputs, compute_values=False)` | Optional. Recompute that sample with gradients: `logprobs` (same shape as `prev_logprobs`), `values` (`[B]`), and `entropy` (`[B, 1]`). |
 
 
-To enable PPO or GRPO, implement `_sample_policy` and `_log_prob_value` in `rl.py`. Return log probabilities for the actions sampled by the policy, expose the trainable `nn.Module` as `self.model` or `self.policy`, and add the supported algorithm to `RL_MODES`. With `RL_MODES = ("eval",)`, evaluation uses `get_action` or `get_action_batch`. [Example policy](policy/demo_policy/README.md#rl-training)
+RLinf PPO and GRPO use the two optional methods above. The fill-in is [policy/demo_policy](policy/demo_policy/README.md#rl-training): implement `_sample_policy` and `_log_prob_value` in `rl.py`, put the trainable `nn.Module` on `self.model` or `self.policy`, and add `"ppo"` or `"grpo"` to `RL_MODES` once the log-probs are real. With `RL_MODES = ("eval",)`, evaluation keeps using `get_action` / `get_action_batch`.
 
 The policy server decodes camera colors before `update_obs` / `update_obs_batch`, so `obs["vision"][<camera>]["color"]` always arrives as an image array — `model.py` never decodes.
 
@@ -224,13 +224,11 @@ The same script pulls the full exports — `hdf5`, `lerobot_v3.0`, `lerobot_v2.1
 
 With this setup, you can test data conversion, model loading, training scripts, and debug-mode evaluation before connecting to a simulator-backed benchmark.
 
-Replace the placeholders below with the GPU indices and environment names used by the policy and client.
-
 ```bash
 export EVAL_ENV_TYPE=debug
 cd policy/demo_policy
 bash install.sh
-bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 '<policy-gpu-id>' '<client-gpu-id>' '<policy-env>' '<client-env>'
+bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 0 0 base base
 ```
 
 The template for any adapter is the same — swap `demo_policy` and the argument values:
@@ -280,7 +278,7 @@ When you run `eval.sh`, you are mostly answering: **which benchmark family**, **
 | `env_cfg_type`                 | Robot / camera / scene configuration key                                         | `arx_x5`                                                                 |
 | `action_type`                  | Action space the policy outputs                                                  | usually `joint` or `ee`                                                  |
 | `seed`                         | Training or evaluation seed / layout id                                          | `0`, `1`, `2`                                                            |
-| `policy_gpu_id` / `env_gpu_id` | Which GPU runs the model vs. the simulator/client                                | GPU indices assigned to your job |
+| `policy_gpu_id` / `env_gpu_id` | Which GPU runs the model vs. the simulator/client                                | `0`, `1`                                                                 |
 | `policy_env_or_uv_path`        | Conda env name or uv env path for the policy server                              | your policy-side env                                                     |
 | `eval_env_conda_env`           | Conda env for the simulator / robot client                                       | your eval-side env                                                       |
 
@@ -291,7 +289,7 @@ When you run `eval.sh`, you are mostly answering: **which benchmark family**, **
 
 ```bash
 cd policy/AHA_WAM
-bash eval.sh RoboDojo stack_bowls cotrain arx_x5 joint 0 '<policy-gpu-id>' '<client-gpu-id>' '<policy-env>' '<client-env>'
+bash eval.sh RoboDojo stack_bowls cotrain arx_x5 joint 0 0 0 aha_wam robodojo
 # loads checkpoints/RoboDojo-cotrain-arx_x5-joint-0/ and evaluates on stack_bowls
 ```
 

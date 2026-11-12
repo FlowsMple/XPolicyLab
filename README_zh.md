@@ -140,7 +140,7 @@ policy/<POLICY>/
 ├── deploy.yml                   # deployment config
 ├── deploy.py                    # deployment loop
 ├── model.py                     # model adapter, served by the policy server
-└── rl.py                        # optional RLinf training methods
+└── rl.py                        # optional RLinf fill-in: _sample_policy, _log_prob_value
 ```
 
 `model.py` 实现面向模型的 API。`deploy.py` 把环境观测桥接到模型 server 调用。最小参考见 [policy/demo_policy](policy/demo_policy/README.md)。
@@ -160,7 +160,7 @@ policy/<POLICY>/
 | `compute_logprob_value(forward_inputs, compute_values=False)` | 可选。带梯度重算该样本：`logprobs`（与 `prev_logprobs` 同形）、`values`（`[B]`）、`entropy`（`[B, 1]`）。 |
 
 
-要启用 PPO 或 GRPO，在 `rl.py` 中实现 `_sample_policy` 和 `_log_prob_value`，返回策略实际采样动作的对数概率，将可训练的 `nn.Module` 放在 `self.model` 或 `self.policy`，并将支持的算法加入 `RL_MODES`。`RL_MODES = ("eval",)` 时，评测使用 `get_action` 或 `get_action_batch`。[策略接入示例](policy/demo_policy/README.md#rl-training)
+RLinf 的 PPO 与 GRPO 使用上面两个可选方法。填空样例是 [policy/demo_policy](policy/demo_policy/README.md#rl-training)：在 `rl.py` 里实现 `_sample_policy` 和 `_log_prob_value`，把可训练的 `nn.Module` 放到 `self.model` 或 `self.policy`，log-prob 真实可用后再把 `"ppo"` 或 `"grpo"` 加进 `RL_MODES`。`RL_MODES = ("eval",)` 时，评测仍使用 `get_action` / `get_action_batch`。
 
 策略 server 在 `update_obs` / `update_obs_batch` 之前已解码相机颜色，因此 `obs["vision"][<camera>]["color"]` 始终是图像数组 —— `model.py` 从不解码。
 
@@ -227,13 +227,11 @@ demo_env/
 
 有了这套布局，就可以在接入仿真 backed benchmark 之前，先测数据转换、模型加载、训练脚本与 debug 模式评测。
 
-将下例中的占位符换成策略和客户端使用的 GPU 编号及 Python 环境名。
-
 ```bash
 export EVAL_ENV_TYPE=debug
 cd policy/demo_policy
 bash install.sh
-bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 '<policy-gpu-id>' '<client-gpu-id>' '<policy-env>' '<client-env>'
+bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 0 0 base base
 ```
 
 任意 adapter 的模板相同 —— 替换 `demo_policy` 与参数即可：
@@ -283,7 +281,7 @@ bash eval.sh <bench_name> <task_name> <ckpt_name> <env_cfg_type> <action_type> <
 | `env_cfg_type`                 | 机器人 / 相机 / 场景配置键             | `arx_x5`                                                          |
 | `action_type`                  | 策略输出的动作空间                    | 通常为 `joint` 或 `ee`                                                |
 | `seed`                         | 训练或评测 seed / 布局 id           | `0`、`1`、`2`                                                       |
-| `policy_gpu_id` / `env_gpu_id` | 模型与仿真/client 各用哪张 GPU        | 作业分配的设备编号 |
+| `policy_gpu_id` / `env_gpu_id` | 模型与仿真/client 各用哪张 GPU        | `0`、`1` |
 | `policy_env_or_uv_path`        | 策略 server 的 conda 环境名或 uv 路径 | 你的策略侧环境                                                           |
 | `eval_env_conda_env`           | 仿真 / 机器人 client 的 conda 环境   | 你的评测侧环境                                                           |
 
@@ -294,7 +292,7 @@ bash eval.sh <bench_name> <task_name> <ckpt_name> <env_cfg_type> <action_type> <
 
 ```bash
 cd policy/AHA_WAM
-bash eval.sh RoboDojo stack_bowls cotrain arx_x5 joint 0 '<policy-gpu-id>' '<client-gpu-id>' '<policy-env>' '<client-env>'
+bash eval.sh RoboDojo stack_bowls cotrain arx_x5 joint 0 0 0 aha_wam robodojo
 # loads checkpoints/RoboDojo-cotrain-arx_x5-joint-0/ and evaluates on stack_bowls
 ```
 

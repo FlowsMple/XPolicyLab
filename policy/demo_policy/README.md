@@ -8,18 +8,18 @@ Shared conventions — argument meanings, checkpoint naming, split-machine deplo
 
 ## Installation
 
-Replace `<policy-env>` with your policy environment name. Installing XPolicyLab in editable mode lets the policy server import `XPolicyLab.policy.demo_policy` and the websocket modules:
+Installs XPolicyLab in editable mode so the policy server can import `XPolicyLab.policy.demo_policy` and the websocket modules:
 
 ```bash
 cd XPolicyLab/policy/demo_policy
-conda activate '<policy-env>'
+conda activate <policy_env>  # e.g. demo-policy
 bash install.sh
 ```
 
 `bash install.sh` does not install the RLinf runtime. After the eval install, activate that env and run the runtime script yourself.
 
 ```bash
-conda activate '<policy-env>'
+conda activate <policy_env>
 bash ../../infra/RLinf/scripts/install_rl_runtime.sh
 ```
 
@@ -28,6 +28,9 @@ bash ../../infra/RLinf/scripts/install_rl_runtime.sh
 Stub — prints the standard output naming convention without converting data. The optional trailing argument is an episode-limit placeholder:
 
 ```bash
+bash process_data.sh <bench_name> <ckpt_name> <env_cfg_type> <action_type> [expert_data_num]
+
+# Example
 bash process_data.sh RoboDojo stack_bowls arx_x5 joint
 ```
 
@@ -36,7 +39,10 @@ bash process_data.sh RoboDojo stack_bowls arx_x5 joint
 Stub — creates the conventional checkpoint directory `checkpoints/<bench_name>-<ckpt_name>-<env_cfg_type>-<action_type>-<seed>/` and prints where real training code should write:
 
 ```bash
-bash train.sh RoboDojo stack_bowls arx_x5 joint 0 '<gpu-id>'
+bash train.sh <bench_name> <ckpt_name> <env_cfg_type> <action_type> <seed> <gpu_id>
+
+# Example
+bash train.sh RoboDojo cotrain arx_x5 joint 0 0
 ```
 
 `demo_policy` does not read this directory during evaluation; real adapters load weights from their own checkpoint path.
@@ -45,15 +51,18 @@ bash train.sh RoboDojo stack_bowls arx_x5 joint 0 '<gpu-id>'
 
 ```bash
 cd XPolicyLab/policy/demo_policy
-# Check observation and action shapes with the offline client
-EVAL_ENV_TYPE=debug bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 '<policy-gpu-id>' '<client-gpu-id>' '<policy-env>' '<client-env>'
+bash eval.sh <bench_name> <task_name> <ckpt_name> <env_cfg_type> <action_type> <seed> \
+  <policy_gpu_id> <env_gpu_id> <policy_conda_env> <eval_env_conda_env>
+
+# Example: offline shape/IO smoke check
+EVAL_ENV_TYPE=debug bash eval.sh RoboDojo stack_bowls demo arx_x5 joint 0 0 0 <policy_conda_env> <eval_env_conda_env>
 ```
 
 `EVAL_ENV_TYPE=debug` runs the offline wiring check (no simulator); leave it unset or set `EVAL_ENV_TYPE=sim` for RoboDojo simulation. For split-machine deployment via `setup_eval_policy_server.sh` / `setup_eval_env_client.sh`, follow the [Deployment Flow](../../README.md#-deployment-flow).
 
 ## RL training
 
-`rl.py` contains the methods a new policy implements to train with RLinf. The example starts with `RL_MODES = ("eval",)` and uses `get_action` or `get_action_batch` for evaluation.
+`rl.py` is the RLinf fill-in. `RL_MODES` is `("eval",)`, so a run with `required_mode: eval` keeps using `get_action` / `get_action_batch`.
 
 To train with PPO or GRPO:
 
